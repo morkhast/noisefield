@@ -229,6 +229,7 @@ const PALETTES = [
   { name:'янтарь',   c:['#060402','#241705','#b8801c','#ffd44a','#fff4d0'] },
   { name:'глубина',  c:['#01050a','#05202e','#1f9e9a','#ff8a4a','#dcfff8'] },
   { name:'пепел',    c:['#060506','#1e1a1e','#9a7f8a','#e0b0c0','#fff0f4'] },
+  { name:'выцвет',   c:['#0a0508','#2e1220','#c4527e','#ff9a5c','#ffe6ea'] },
 ];
 
 /* -------------------------------------------------- Описание крутилок ---- */
@@ -248,6 +249,22 @@ const FACTORY = [
                                       shape:.80, bloom:1.2, chroma:1.2, exposure:1.2 } },
   { name:'паутина', palette:6,  cfg:{ complexity:.80, contrast:.78, density:.40, fill:.08,
                                       speed:.35, bloom:2.0, bloomThr:.18, grain:.18, exposure:1.4 } },
+  /* Видеообратная связь как у Loveless-клипов: камера смотрит в собственный
+     монитор с малым наездом и доворотом, всё расфокусировано, каналы
+     разъезжаются. Реакция на звук сознательно придушена — вся эстетика в
+     том, что картинка плывёт поперёк музыки, а не отвечает ей. */
+  { name:'размыв',  palette:12, cfg:{ persist:.86, fbZoom:1.004, fbRot:.004, fbSwirl:.010,
+                                      speed:.18, shape:.60, complexity:.45, density:.55,
+                                      fill:.55, contrast:.35,
+                                      defocus:.72, defRad:5.5, bloom:2.2, bloomThr:.05, bloomRad:5.0,
+                                      chroma:1.3, grain:.30, exposure:1.35, vignette:.35, sat:1.25,
+                                      punch:0, dBass:.45, dMid:.35, dHigh:.25, dEnergy:.50 } },
+  { name:'пелена',  palette:12, cfg:{ persist:.92, fbZoom:1.002, fbRot:-.002, fbSwirl:.004,
+                                      speed:.10, shape:.40, complexity:.30, density:.40,
+                                      fill:.70, contrast:.16,
+                                      defocus:.94, defRad:8.0, bloom:1.6, bloomThr:.02, bloomRad:4.0,
+                                      chroma:.70, grain:.22, exposure:1.30, vignette:.55, sat:1.05,
+                                      punch:0, dBass:.30, dMid:.25, dHigh:.15, dEnergy:.35 } },
   { name:'вихрь',   palette:10, cfg:{ twist:1.4, segments:3, persist:.50, fbSwirl:.05,
                                       complexity:.60, density:.45, contrast:.68, bloom:1.4 } },
   // сцена «облака»
@@ -341,6 +358,8 @@ const SPEC = [
    ['bloom',    'свечение',  0,3,.001, 1.0],
    ['bloomThr', 'порог',     0,1.5,.001, .32],
    ['bloomRad', 'радиус',    .5,6,.01, 2.0],
+   ['defocus',  'расфокус',  0,1,.001, 0],
+   ['defRad',   'радиус расфокуса',1,12,.05, 4.0],
    ['chroma',   'аберрация', 0,3,.01, 0],
    ['grain',    'зерно',     0,1,.001, .10],
    ['vignette', 'виньетка',  0,1.5,.001, .60],
@@ -1223,9 +1242,9 @@ void main(){
 const FS_COMP = `#version 300 es
 precision highp float;
 out vec4 outColor;
-uniform sampler2D uScene, uBloom;
+uniform sampler2D uScene, uBloom, uDefTex;
 uniform vec2 uRes;
-uniform float uAmt, uTime, uChroma, uGrain, uExposure, uHue, uSat;
+uniform float uAmt, uTime, uChroma, uGrain, uExposure, uHue, uSat, uDefocus;
 
 vec3 rgb2hsv(vec3 c){
   vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
@@ -1244,14 +1263,24 @@ void main(){
   vec2 uv = gl_FragCoord.xy/uRes;
   vec2 off = (uv - 0.5) * uChroma * 0.006;
 
+  // Расфокус подмешивается ДО свечения: иначе размывается уже подсвеченное,
+  // и ореол вокруг яркого остаётся резким — ровно тот край, которого быть не
+  // должно.
+  vec3 sharp = texture(uScene, uv).rgb;
+  if (uDefocus > 0.001) sharp = mix(sharp, texture(uDefTex, uv).rgb, uDefocus);
+
   vec3 c;
   if (uChroma > 0.001){
     // Хроматическая аберрация: каналы расходятся тем сильнее, чем дальше
     // от центра — дешёвая имитация линзы.
-    c = vec3(texture(uScene, uv + off).r, texture(uScene, uv).g, texture(uScene, uv - off).b)
+    vec3 sr = uDefocus > 0.001 ? mix(texture(uScene, uv + off).rgb, texture(uDefTex, uv + off).rgb, uDefocus)
+                               : texture(uScene, uv + off).rgb;
+    vec3 sb = uDefocus > 0.001 ? mix(texture(uScene, uv - off).rgb, texture(uDefTex, uv - off).rgb, uDefocus)
+                               : texture(uScene, uv - off).rgb;
+    c = vec3(sr.r, sharp.g, sb.b)
       + vec3(texture(uBloom, uv + off).r, texture(uBloom, uv).g, texture(uBloom, uv - off).b) * uAmt;
   } else {
-    c = texture(uScene, uv).rgb + texture(uBloom, uv).rgb * uAmt;
+    c = sharp + texture(uBloom, uv).rgb * uAmt;
   }
 
   c *= uExposure;
@@ -1384,7 +1413,7 @@ function makeFBO(w, h, wrap){
   return {t,f,w,h};
 }
 
-let SCENE=null, HIST_A=null, HIST_B=null, BL_A=null, BL_B=null, LDR=null, W=0, H=0, lastBudget=-1;
+let SCENE=null, HIST_A=null, HIST_B=null, BL_A=null, BL_B=null, DEF=null, LDR=null, W=0, H=0, lastBudget=-1;
 let RD_A=null, RD_B=null, RD_W=0, RD_H=0, simNeedsInit=true;
 // Автобюджет: ползунок задаёт потолок, а фактическое разрешение подстраивается
 // так, чтобы держать 60. Иначе на машине послабее всё едет молча, и понять,
@@ -1401,10 +1430,11 @@ function allocate(){
   if (s < 1){ w = Math.round(w*s); h = Math.round(h*s); }
   if (w === W && h === H && budget === lastBudget) return;
   W = w; H = h; lastBudget = budget; cv.width = w; cv.height = h;
-  [SCENE,HIST_A,HIST_B,BL_A,BL_B,LDR].forEach(f => { if(f){ gl.deleteTexture(f.t); gl.deleteFramebuffer(f.f); } });
+  [SCENE,HIST_A,HIST_B,BL_A,BL_B,DEF,LDR].forEach(f => { if(f){ gl.deleteTexture(f.t); gl.deleteFramebuffer(f.f); } });
   SCENE  = makeFBO(W,H);
   HIST_A = makeFBO(W,H); HIST_B = makeFBO(W,H);
   BL_A   = makeFBO(W>>1,H>>1); BL_B = makeFBO(W>>1,H>>1);
+  DEF    = makeFBO(W>>1,H>>1);
   LDR    = makeFBO(W,H);
   // Поле реакции живёт своим разрешением: узор крупный, гнаться за экраном
   // ему незачем, а шагов симуляции на кадр нужно много.
@@ -3002,6 +3032,20 @@ function frame(){
   });
   const tmp = HIST_A; HIST_A = HIST_B; HIST_B = tmp;
 
+  /* Расфокус. Свечение аддитивно и работает выше порога: оно подсвечивает
+     яркое, но резкость не трогает. Здесь размывается весь кадр целиком, без
+     порога, и потом подмешивается к картинке — только так пропадает резкий
+     край у тёмного, а без этого «не в фокусе» не читается. */
+  if (CFG.defocus > 0.001){
+    pass(BL_A, P_BRIGHT, u => { bind(0, HIST_A.t, u.uTex); gl.uniform1f(u.uThr, -1.0); });
+    for (const m of [0.6, 1.4]){
+      const rad = CFG.defRad * m;
+      pass(BL_B, P_BLUR, u => { bind(0, BL_A.t, u.uTex); gl.uniform2f(u.uDir, rad, 0); });
+      pass(BL_A, P_BLUR, u => { bind(0, BL_B.t, u.uTex); gl.uniform2f(u.uDir, 0, rad); });
+    }
+    pass(DEF, P_BRIGHT, u => { bind(0, BL_A.t, u.uTex); gl.uniform1f(u.uThr, -1.0); });
+  }
+
   pass(BL_A, P_BRIGHT, u => { bind(0, HIST_A.t, u.uTex); gl.uniform1f(u.uThr, CFG.bloomThr); });
   for (const m of [0.5, 1.0, 1.75]){
     const rad = CFG.bloomRad * m;
@@ -3011,6 +3055,8 @@ function frame(){
 
   pass(LDR, P_COMP, u => {
     bind(0, HIST_A.t, u.uScene); bind(1, BL_A.t, u.uBloom);
+    bind(2, (CFG.defocus > 0.001 ? DEF : HIST_A).t, u.uDefTex);
+    gl.uniform1f(u.uDefocus, CFG.defocus);
     gl.uniform1f(u.uAmt, CFG.bloom * (0.7 + 0.5*F.energy*CFG.dEnergy));
     gl.uniform1f(u.uTime, T);        gl.uniform1f(u.uChroma, CFG.chroma);
     gl.uniform1f(u.uGrain, CFG.grain); gl.uniform1f(u.uExposure, CFG.exposure);
