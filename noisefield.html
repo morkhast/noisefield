@@ -151,6 +151,7 @@
 <div id="intro" class="glass">
   <h1>noisefield</h1>
   <p>киньте трек в окно · или <span class="browse" id="browse">выберите файл</span></p>
+  <p>для выступления — <span class="browse" id="go-live">линейный вход с пульта</span></p>
   <p style="font-size:11px;opacity:.55">без звука поле просто медленно течёт</p>
 </div>
 
@@ -178,10 +179,16 @@
   <span id="t-name">—</span>
   <div id="t-bar" title="клик — перемотка"><i id="t-fill"></i></div>
   <span id="t-time">0:00 / 0:00</span>
+  <select id="live-dev" class="gone" title="вход"></select>
   <span id="t-rec" class="off">●</span>
 </div>
 
 <div id="err" class="glass"></div>
+<style>
+#live-dev{background:rgba(0,0,0,.35);color:#cfd6e4;border:1px solid rgba(255,255,255,.14);
+  border-radius:5px;font:inherit;font-size:11px;max-width:190px;padding:2px 4px;outline:none}
+#live-dev.gone{display:none}
+</style>
 <input type="file" id="file" accept="audio/*" hidden>
 
 <script>
@@ -342,6 +349,7 @@ const SPEC = [
  ]},
  { id:'react', title:'РЕАКЦИЯ НА ЗВУК', items:[
    ['punch',   'бит ↔ мелодия',0,1,.001, .60],
+   ['lookAhead','упреждение, мс',0,300,1, 120],
    ['dBass',   'низ → удар',   0,2,.001, 1.0],
    ['dMid',    'середина → форма',0,2,.001, 1.0],
    ['dHigh',   'верх → резкость',0,2,.001, 1.0],
@@ -1500,7 +1508,8 @@ gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-let ac=null, analyser=null, srcNode=null, audioBuf=null, dbBuf=null;
+let ac=null, analyser=null, srcNode=null, audioBuf=null, dbBuf=null, outGain=null;
+const now = () => performance.now()/1000;
 let startedAt=0, offset=0, playing=false;
 
 const F = { bass:0, mid:0, high:0, energy:0, pulse:0 };
@@ -1754,6 +1763,7 @@ function readWave(pos){
 }
 
 function analyze(dt, now){
+  if (LIVE.on){ analyzeFromLive(dt); return; }
   if (TRACK && audioBuf && playing){ analyzeFromTrack(dt); return; }
   if (!(audioBuf && playing)){
     // Сигнала нет — признаки просто гаснут, поле продолжает течь само.
@@ -1801,31 +1811,7 @@ async function loadFile(file){
       mSrc.textContent = 'разбираю ' + pct + '%';
       tName.textContent = 'разбираю ' + pct + '%';
     });
-    if (!analyser){
-      analyser = ac.createAnalyser();
-      analyser.fftSize = FFT_SIZE;
-      analyser.smoothingTimeConstant = 0;     // сглаживаем сами, руками выше
-      analyser.minDecibels = -100; analyser.maxDecibels = 0;
-      // Источник идёт в узел-развилку: оттуда в общий анализатор (он сводит
-      // каналы) и в разделитель, дающий левый и правый отдельно. Без этого
-      // гониометр рисовать не из чего — стерео до него не доходит.
-      hub = ac.createGain();
-      hub.connect(analyser);
-      analyser.connect(ac.destination);
-      const split = ac.createChannelSplitter(2);
-      hub.connect(split);
-      anaL = ac.createAnalyser(); anaR = ac.createAnalyser();
-      anaL.fftSize = 2048; anaR.fftSize = 2048;
-      anaL.smoothingTimeConstant = 0; anaR.smoothingTimeConstant = 0;
-      split.connect(anaL, 0); split.connect(anaR, 1);
-      anaOn = ac.createAnalyser();
-      anaOn.fftSize = ONSET_FFT; anaOn.smoothingTimeConstant = 0;
-      anaOn.minDecibels = -100; anaOn.maxDecibels = 0;
-      hub.connect(anaOn);
-      onsetMag  = new Float32Array(anaOn.frequencyBinCount);
-      onsetPrev = new Float32Array(anaOn.frequencyBinCount);
-      dbBuf = new Float32Array(analyser.frequencyBinCount);
-    }
+    buildGraph();
     offset = 0; startPlayback();
     intro.classList.add('gone');
     transport.classList.remove('gone');
@@ -1834,6 +1820,37 @@ async function loadFile(file){
     tName.textContent = file.name + '  ·  ' + TRACK.kicks.length + ' ударов';
   } catch(e){ mSrc.textContent = 'не смог прочитать файл'; console.error(e); }
 }
+// Граф один на оба источника: файл и линия подключаются к тому же hub.
+function buildGraph(){
+  if (analyser) return;
+  analyser = ac.createAnalyser();
+  analyser.fftSize = FFT_SIZE;
+  analyser.smoothingTimeConstant = 0;     // сглаживаем сами, руками выше
+  analyser.minDecibels = -100; analyser.maxDecibels = 0;
+  // Источник идёт в узел-развилку: оттуда в общий анализатор (он сводит
+  // каналы) и в разделитель, дающий левый и правый отдельно. Без этого
+  // гониометр рисовать не из чего — стерео до него не доходит.
+  hub = ac.createGain();
+  hub.connect(analyser);
+  // Выходной кран: с линии звук в динамики не возвращаем, он уже в зале.
+  outGain = ac.createGain();
+  analyser.connect(outGain);
+  outGain.connect(ac.destination);
+  const split = ac.createChannelSplitter(2);
+  hub.connect(split);
+  anaL = ac.createAnalyser(); anaR = ac.createAnalyser();
+  anaL.fftSize = 2048; anaR.fftSize = 2048;
+  anaL.smoothingTimeConstant = 0; anaR.smoothingTimeConstant = 0;
+  split.connect(anaL, 0); split.connect(anaR, 1);
+  anaOn = ac.createAnalyser();
+  anaOn.fftSize = ONSET_FFT; anaOn.smoothingTimeConstant = 0;
+  anaOn.minDecibels = -100; anaOn.maxDecibels = 0;
+  hub.connect(anaOn);
+  onsetMag  = new Float32Array(anaOn.frequencyBinCount);
+  onsetPrev = new Float32Array(anaOn.frequencyBinCount);
+  dbBuf = new Float32Array(analyser.frequencyBinCount);
+}
+
 function startPlayback(){
   stopPlayback();
   srcNode = ac.createBufferSource();
@@ -2062,6 +2079,327 @@ async function analyzeTrack(buf, onProgress){
            dur: buf.duration, chL, chR };
 }
 
+/* ── Живой вход с пульта ───────────────────────────────────────────────────
+   Разбор файла целиком снимает две беды живого анализа: он видит будущее и
+   знает громкость всей записи заранее. Ни того, ни другого на выступлении
+   нет, но обе беды лечатся, а не обходятся.
+
+   Будущее покупается задержкой. Анализ идёт впереди картинки на несколько
+   кадров, и порог для удара берётся из симметричного окна — ровно как
+   офлайн, просто картинка отстаёт от звука на сотню миллисекунд. Зрителю
+   это незаметно: звук по залу и так идёт медленнее.
+
+   Громкость набирается скользящим окном. Через полминуты сета оно знает
+   материал не хуже, чем разбор знает файл: те же перцентили, только по
+   последним двадцати секундам, а не по всему треку.
+
+   Анализ живёт в AudioWorklet, а не в кадре отрисовки. Кадр это 17 мс и он
+   плавает; воркл_ет считает ровно теми же шагами по 512 отсчётов, что и
+   разбор файла, и его шаг не зависит от того, успевает ли видеокарта. */
+
+const LIVE_RING = 2048;                    // ~24 с истории при шаге 11.6 мс
+const LIVE_CAL  = 1720;                    // окно калибровки, ~20 с
+
+const LIVE = {
+  on: false, stream: null, src: null, node: null, deviceId: null, label: '',
+  head: 0, seen: 0, read: -1,
+  bands: new Float32Array(LIVE_RING*SPEC_BINS),
+  flux:  new Float32Array(LIVE_RING),
+  gb: new Float32Array(LIVE_RING), gm: new Float32Array(LIVE_RING),
+  gh: new Float32Array(LIVE_RING), ge: new Float32Array(LIVE_RING),
+  dyn: null, scale: 1, calAt: -1e9, cal: 0,
+  norm: new Float32Array(SPEC_BINS).fill(1e-4),
+  sal: [], salRef: 1e-6,
+  lastKickFrame: -1e9, bpmHits: [], bpm: 0,
+};
+
+// Воркл_ет собирается из строки: файл должен остаться одним файлом.
+const LIVE_WORKLET = `
+class NFA extends AudioWorkletProcessor {
+  constructor(){
+    super();
+    this.WIN = 1024; this.HOP = 512;
+    this.buf = new Float32Array(this.WIN); this.fill = 0;
+    this.re = new Float32Array(this.WIN); this.im = new Float32Array(this.WIN);
+    this.han = new Float32Array(this.WIN);
+    for (let i = 0; i < this.WIN; i++) this.han[i] = 0.5 - 0.5*Math.cos(2*Math.PI*i/(this.WIN-1));
+    const n = this.WIN, levels = Math.round(Math.log2(n));
+    this.cs = new Float32Array(n/2); this.sn = new Float32Array(n/2);
+    for (let i = 0; i < n/2; i++){ this.cs[i] = Math.cos(2*Math.PI*i/n); this.sn[i] = Math.sin(2*Math.PI*i/n); }
+    this.rev = new Uint32Array(n);
+    for (let i = 0; i < n; i++){ let x = i, r = 0; for (let j = 0; j < levels; j++){ r = (r<<1)|(x&1); x >>= 1; } this.rev[i] = r; }
+    // Те же 32 логарифмические полосы, что и в разборе файла.
+    const BINS = 32, LO = 40, HI = 16000;
+    const binHz = sampleRate/this.WIN, ratio = Math.pow(HI/LO, 1/BINS);
+    this.rng = []; let f = LO;
+    for (let k = 0; k < BINS; k++){
+      const f2 = f*ratio;
+      const a = Math.max(1, Math.round(f/binHz));
+      const b = Math.min(this.WIN/2 - 1, Math.max(a, Math.round(f2/binHz)));
+      this.rng.push([a, b]); f = f2;
+    }
+    this.prev = new Float32Array(BINS);
+    this.BINS = BINS;
+  }
+  fft(re, im){
+    const n = this.WIN;
+    for (let i = 0; i < n; i++){ const j = this.rev[i]; if (j > i){ let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+    for (let size = 2; size <= n; size <<= 1){
+      const half = size >> 1, step = n/size;
+      for (let i = 0; i < n; i += size)
+        for (let j = i, k = 0; j < i + half; j++, k += step){
+          const l = j + half;
+          const tre =  re[l]*this.cs[k] + im[l]*this.sn[k];
+          const tim = -re[l]*this.sn[k] + im[l]*this.cs[k];
+          re[l] = re[j] - tre; im[l] = im[j] - tim;
+          re[j] += tre;        im[j] += tim;
+        }
+    }
+  }
+  emit(){
+    const W = this.WIN;
+    for (let i = 0; i < W; i++){ this.re[i] = this.buf[i]*this.han[i]; this.im[i] = 0; }
+    this.fft(this.re, this.im);
+    const out = new Float32Array(this.BINS);
+    let fx = 0;
+    for (let k = 0; k < this.BINS; k++){
+      const a = this.rng[k][0], b = this.rng[k][1];
+      let sum = 0;
+      for (let i = a; i <= b; i++) sum += Math.sqrt(this.re[i]*this.re[i] + this.im[i]*this.im[i]);
+      const v = sum/(b - a + 1)*4/W;
+      out[k] = v;
+      if (k < 10){ const d = v - this.prev[k]; if (d > 0) fx += d; }
+      this.prev[k] = v;
+    }
+    this.port.postMessage({ b: out, f: fx }, [out.buffer]);
+  }
+  process(inputs){
+    const ch = inputs[0];
+    if (!ch || !ch.length) return true;
+    const a = ch[0], b = ch.length > 1 ? ch[1] : ch[0];
+    if (!a) return true;
+    for (let i = 0; i < a.length; i++){
+      this.buf[this.fill++] = (a[i] + b[i])*0.5;
+      if (this.fill === this.WIN){
+        this.emit();
+        this.buf.copyWithin(0, this.HOP);
+        this.fill = this.WIN - this.HOP;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('nfa', NFA);
+`;
+
+// Полосы усредняются уже нормированными, как в разборе файла: полоса
+// отвечает на вопрос «насколько здесь оживлённо относительно обычного».
+function liveGroup(n, r){
+  const base = (n % LIVE_RING)*SPEC_BINS;
+  let s = 0;
+  for (let k = r[0]; k < r[1]; k++) s += Math.min(1, LIVE.bands[base + k]/LIVE.norm[k]);
+  return s/(r[1] - r[0]);
+}
+
+// Перцентили по скользящему окну — живая замена разбору всего трека.
+function liveCalibrate(){
+  const n = Math.min(LIVE.seen, LIVE_CAL);
+  if (n < 180) return;                      // меньше двух секунд — рано
+  const tmp = new Float32Array(n);
+  const span = (src, lo, hi) => {
+    for (let i = 0; i < n; i++) tmp[i] = src[(LIVE.head - 1 - i + LIVE_RING*2) % LIVE_RING];
+    const q = Array.prototype.slice.call(tmp).sort((a,b)=>a-b);
+    const a = q[Math.floor(n*lo)] || 0, b = q[Math.floor(n*hi)] || 1;
+    return [a, Math.max(b, a + 0.05)];
+  };
+  LIVE.dyn = { bass: span(LIVE.gb, 0.12, 0.96), mid: span(LIVE.gm, 0.12, 0.96),
+               high: span(LIVE.gh, 0.12, 0.96), energy: span(LIVE.ge, 0.12, 0.96) };
+  const fs = span(LIVE.flux, 0.12, 0.97);
+  LIVE.scale = fs[1] > 1e-9 ? 1/fs[1] : 1;
+
+  // Потолок каждой полосы отдельно — иначе спектр меряется в абсолютных
+  // величинах, где верх на порядок тише низа, и вся картинка бас-хэви.
+  // Берём каждый четвёртый кадр: точности перцентиля хватает, работы вчетверо
+  // меньше, а считается это дважды в секунду.
+  const step = 4, m = Math.max(8, (n/step)|0), col = new Float32Array(m);
+  for (let k = 0; k < SPEC_BINS; k++){
+    for (let i = 0; i < m; i++)
+      col[i] = LIVE.bands[((LIVE.head - 1 - i*step + LIVE_RING*2) % LIVE_RING)*SPEC_BINS + k];
+    const q = Array.prototype.slice.call(col).sort((a,b)=>a-b);
+    LIVE.norm[k] = Math.max(q[Math.floor(m*0.97)] || 0, 1e-7);
+  }
+  LIVE.cal = Math.min(1, n/LIVE_CAL);
+}
+
+// Пик потока в кадре n. Окно назад полное, вперёд — сколько позволяет
+// упреждение: в этом и весь размен между точностью и задержкой.
+function livePeak(n, wf){
+  const WB = 24, GAP = Math.max(4, Math.round(0.10*ac.sampleRate/HOP));
+  if (n - LIVE.lastKickFrame < GAP) return 0;
+  const at = i => LIVE.flux[(i % LIVE_RING + LIVE_RING) % LIVE_RING]*LIVE.scale;
+  const lo = Math.max(LIVE.head - LIVE.seen, n - WB), hi = n + wf;
+  let mean = 0, cnt = 0;
+  for (let i = lo; i <= hi; i++){ mean += at(i); cnt++; }
+  if (!cnt) return 0;
+  mean /= cnt;
+  let dev = 0;
+  for (let i = lo; i <= hi; i++) dev += Math.abs(at(i) - mean);
+  dev /= cnt;
+  const v = at(n), thr = mean + dev*1.6 + 0.012;
+  if (!(v > thr && v >= at(n-1) && (wf < 1 || v > at(n+1)))) return 0;
+  LIVE.lastKickFrame = n;
+  return v - thr;
+}
+
+async function startLive(deviceId){
+  ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+  await ac.resume();
+  // Обработка микрофонного тракта убивает ровно то, на чём всё держится:
+  // автогромкость съедает динамику, шумодав и эхоподавление — транзиенты.
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      deviceId: deviceId ? { exact: deviceId } : undefined,
+      echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+      channelCount: 2,
+    }, video: false });
+  stopLive(true);
+  stopPlayback(); TRACK = null; audioBuf = null;
+  buildGraph();
+  if (!LIVE.node){
+    const url = URL.createObjectURL(new Blob([LIVE_WORKLET], { type: 'text/javascript' }));
+    await ac.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+  }
+  LIVE.head = 0; LIVE.seen = 0; LIVE.read = -1; LIVE.dyn = null; LIVE.cal = 0;
+  LIVE.sal.length = 0; LIVE.salRef = 1e-6; LIVE.lastKickFrame = -1e9; LIVE.bpmHits.length = 0;
+  LIVE.norm.fill(1e-4);
+  LIVE.stream = stream;
+  LIVE.src = ac.createMediaStreamSource(stream);
+  LIVE.node = new AudioWorkletNode(ac, 'nfa');
+  LIVE.node.port.onmessage = e => {
+    const h = LIVE.head;
+    LIVE.bands.set(e.data.b, (h % LIVE_RING)*SPEC_BINS);
+    LIVE.flux[h % LIVE_RING] = e.data.f;
+    const b = liveGroup(h, B_BASS), m = liveGroup(h, B_MID), g = liveGroup(h, B_HIGH);
+    LIVE.gb[h % LIVE_RING] = b; LIVE.gm[h % LIVE_RING] = m; LIVE.gh[h % LIVE_RING] = g;
+    LIVE.ge[h % LIVE_RING] = b*0.5 + m*0.35 + g*0.15;
+    LIVE.head = h + 1; LIVE.seen++;
+  };
+  LIVE.src.connect(LIVE.node);
+  LIVE.src.connect(hub);
+  // Сигнал с пульта в динамики не возвращаем: он и так звучит в зале.
+  outGain.gain.value = 0;
+  const tr = stream.getAudioTracks()[0];
+  LIVE.label = (tr && tr.label) || 'линейный вход';
+  LIVE.deviceId = tr && tr.getSettings ? tr.getSettings().deviceId : deviceId;
+  LIVE.on = true; playing = true;
+  intro.classList.add('gone');
+  transport.classList.remove('gone');
+  document.body.classList.add('playing');
+  const sel = document.getElementById('live-dev');
+  if (sel){
+    sel.classList.remove('gone');
+    sel.onchange = () => startLive(sel.value).then(l => { mSrc.textContent = l; tName.textContent = l; });
+  }
+  liveDevices();
+  return LIVE.label;
+}
+
+function stopLive(keepGraph){
+  if (LIVE.node){ try{ LIVE.node.port.onmessage = null; LIVE.node.disconnect(); }catch(e){} }
+  if (LIVE.src) { try{ LIVE.src.disconnect(); }catch(e){} }
+  if (LIVE.stream) LIVE.stream.getTracks().forEach(t => t.stop());
+  LIVE.stream = null; LIVE.src = null; LIVE.on = false;
+  if (!keepGraph && outGain) outGain.gain.value = 1;
+  if (!keepGraph) playing = false;
+}
+
+// Разбор живого потока. Отличий от файла ровно два: кадры берутся из кольца
+// с отставанием на упреждение, а пороги — от скользящей калибровки.
+function analyzeFromLive(dt){
+  const LOOKF = Math.max(0, Math.round(CFG.lookAhead/1000*ac.sampleRate/HOP));
+  const target = LIVE.head - 1 - LOOKF;
+  if (target < 0){ F.pulse *= Math.exp(-dt/CFG.pulseDec); return; }
+
+  if (now() - LIVE.calAt > 0.5){ LIVE.calAt = now(); liveCalibrate(); }
+
+  // Догоняем по всем пропущенным кадрам: кадр отрисовки длиннее шага анализа,
+  // и удар между кадрами иначе просто исчезнет.
+  if (LIVE.read < 0) LIVE.read = target - 1;
+  if (target - LIVE.read > LIVE_RING - 64) LIVE.read = target - 1;   // отстали — прыгаем
+  const L = punchLaw();
+  while (LIVE.read < target){
+    const n = ++LIVE.read;
+    const sal = livePeak(n, LOOKF);
+    if (sal > 0){
+      LIVE.sal.push(sal);
+      if (LIVE.sal.length > 96) LIVE.sal.shift();
+      const q = LIVE.sal.slice().sort((a,b)=>a-b);
+      LIVE.salRef = Math.max(q[Math.floor(q.length*0.90)], 1e-6);
+      fire(0, kickWeight(Math.min(1.6, sal/LIVE.salRef), L.gK));
+      const t = n*HOP/ac.sampleRate;
+      LIVE.bpmHits.push(t);
+      while (LIVE.bpmHits.length && t - LIVE.bpmHits[0] > 12) LIVE.bpmHits.shift();
+      if (LIVE.bpmHits.length > 8){
+        const gaps = [];
+        for (let i = 1; i < LIVE.bpmHits.length; i++) gaps.push(LIVE.bpmHits[i] - LIVE.bpmHits[i-1]);
+        gaps.sort((a,b)=>a-b);
+        const med = gaps[gaps.length >> 1];
+        if (med > 0.15 && med < 1.6){
+          let per = med;
+          while (60/per > 190) per *= 2;
+          while (60/per < 70)  per *= 0.5;
+          LIVE.bpm = Math.round(60/per);
+        }
+      }
+    }
+  }
+
+  const base = (target % LIVE_RING)*SPEC_BINS;
+  const D = LIVE.dyn || SPAN_LIVE;
+  for (let k = 0; k < SPEC_BINS; k++){
+    const norm = Math.min(1, LIVE.bands[base + k]/LIVE.norm[k]);
+    specRaw[k] = LIVE.bands[base + k]; specNorm[k] = norm;
+    const tc = norm > specEnv[k] ? CFG.attack*2 : CFG.release;
+    specEnv[k] += (norm - specEnv[k]) * (1 - Math.exp(-dt/tc));
+  }
+  uploadSpectrum();
+
+  const rb = liveGroup(target, B_BASS), rm = liveGroup(target, B_MID), rh = liveGroup(target, B_HIGH);
+  const bn = shape(rb, D.bass, L.gB);
+  const mn = shape(rm, D.mid,  L.gM) * L.mel;
+  const hn = shape(rh, D.high, L.gM) * L.mel;
+  const en = shape(rb*0.5 + rm*0.35 + rh*0.15, D.energy, L.gE);
+  F.bass   = envelope(F.bass,   bn, dt, CFG.attack, CFG.release);
+  F.mid    = envelope(F.mid,    mn, dt, CFG.attack*4, CFG.release*1.7);
+  F.high   = envelope(F.high,   hn, dt, CFG.attack*2.5, CFG.release*1.2);
+  F.energy = envelope(F.energy, en, dt, CFG.attack*7, CFG.release*2.8);
+
+  F.pulse *= Math.exp(-dt/CFG.pulseDec);
+  morph += (morphTarget - morph) * (1 - Math.exp(-dt/0.6));
+  updateScopes(true, dt);
+}
+
+// Список входов. Метки устройств браузер отдаёт только после разрешения,
+// поэтому обновляем их ещё раз уже после старта.
+async function liveDevices(){
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
+  const all = await navigator.mediaDevices.enumerateDevices();
+  const ins = all.filter(d => d.kind === 'audioinput');
+  const sel = document.getElementById('live-dev');
+  if (sel){
+    sel.innerHTML = '';
+    for (const d of ins){
+      const o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || ('вход ' + (sel.children.length + 1));
+      if (d.deviceId === LIVE.deviceId) o.selected = true;
+      sel.appendChild(o);
+    }
+  }
+  return ins;
+}
+
 /* --- транспорт --------------------------------------------------------- */
 
 const transport = document.getElementById('transport');
@@ -2090,6 +2428,13 @@ const mmss = t => Math.floor(t/60) + ':' + String(Math.floor(t%60)).padStart(2,'
 
 let transportAt = 0;
 function updateTransport(){
+  if (LIVE.on){
+    tFill.style.width = (LIVE.cal*100) + '%';
+    tTime.textContent = LIVE.cal < 0.99 ? 'калибрую ' + ((LIVE.cal*100)|0) + '%'
+                                        : (LIVE.bpm ? LIVE.bpm + ' bpm' : 'слушаю');
+    tPlay.textContent = '◉';
+    return;
+  }
   if (!audioBuf) return;
   const pos = position(), dur = audioBuf.duration;
   tFill.style.width = (pos/dur*100) + '%';
@@ -2167,6 +2512,20 @@ function toggleRecording(){
 
 const fileInput = document.getElementById('file');
 document.getElementById('browse').onclick = () => fileInput.click();
+document.getElementById('go-live').onclick = async () => {
+  const el = document.getElementById('go-live');
+  const was = el.textContent;
+  el.textContent = 'разрешите доступ ко входу…';
+  try{
+    const label = await startLive(null);
+    mSrc.textContent = label;
+    tName.textContent = label;
+  } catch(e){
+    el.textContent = was;
+    mSrc.textContent = 'вход недоступен';
+    console.error(e);
+  }
+};
 fileInput.onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); };
 addEventListener('dragover',  e => { e.preventDefault(); document.body.classList.add('drag'); });
 addEventListener('dragleave', () => document.body.classList.remove('drag'));
@@ -2538,7 +2897,7 @@ const keys  = document.getElementById('keys');
 panel.classList.add('gone');
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
-  if (e.code === 'Space'){ e.preventDefault(); togglePlayback(); }
+  if (e.code === 'Space'){ e.preventDefault(); if (!LIVE.on) togglePlayback(); }
   else if (e.code === 'Tab'){ e.preventDefault(); cycleScene(); }
   else if (e.key === 'g'){ panel.classList.toggle('gone'); }
   else if (e.key === 'p'){ cyclePalette(); }
@@ -2547,6 +2906,8 @@ addEventListener('keydown', e => {
   else if (e.key === 'f'){ document.fullscreenElement ? document.exitFullscreen() : document.body.requestFullscreen(); }
   else if (e.key === 's'){ wantShot = true; }
   else if (e.key === 'v'){ toggleRecording(); }
+  // Ручной удар: когда детектор поплыл на бесформенном куске, бит ведут руками.
+  else if (e.key === 'b'){ fire(0, kickWeight(1.0, punchLaw().gK)); }
   else if (e.key === 't'){
     transport.classList.toggle('gone');
     document.body.classList.toggle('playing', !transport.classList.contains('gone') && !!audioBuf);
