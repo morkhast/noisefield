@@ -23,6 +23,8 @@
   #intro h1{ margin:0 0 4px; font-size:17px; font-weight:500; letter-spacing:.22em; color:#eaf1ff; }
   #intro p{ margin:6px 0 0; color:var(--dim); }
   #intro .browse{ color:var(--accent); text-decoration:underline; cursor:pointer; }
+  #intro .note{ color:var(--hot); font-size:11px; }
+  #intro .note:empty{ display:none; }
   #intro.gone{ opacity:0; pointer-events:none; }
   body.drag #intro{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(110,168,255,.15); }
 
@@ -114,6 +116,11 @@
   #hud .fill.hot{ background:var(--hot); }
   #hud .meta{ margin-top:8px; padding-top:7px; border-top:1px solid var(--line); color:var(--dim); }
   #hud .meta b{ color:var(--fg); font-weight:500; }
+  /* «Устройство открылось» и «сигнал идёт» — разные вещи, и врозь их видно
+     только если показывать врозь. */
+  #hud #m-sig{ display:none; }
+  #hud #m-sig.on{ display:block; color:var(--dim); }
+  #hud #m-sig.bad{ display:block; color:var(--hot); }
   #hud.gone,#keys.gone{ display:none; }
 
   #keys{ position:fixed; left:12px; top:12px; padding:7px 11px; color:var(--dim); }
@@ -140,6 +147,20 @@
   #t-rec.on{ animation:nf-blink 1s steps(2) infinite; }
   @keyframes nf-blink{ 50%{ opacity:.2; } }
 
+  /* ---- диагностика звукового тракта ---- */
+  #diag{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:min(660px,88vw);
+         max-height:78vh; padding:0; display:flex; flex-direction:column; overflow:hidden; }
+  #diag.gone{ display:none; }
+  #diag header{ padding:10px 12px; border-bottom:1px solid var(--line); display:flex;
+                align-items:center; justify-content:space-between; flex:none; }
+  #diag header b{ font-weight:500; letter-spacing:.18em; color:#eaf1ff; }
+  #diag header .act{ color:var(--accent); cursor:pointer; font-size:11px; }
+  #diag header .act:hover{ text-decoration:underline; }
+  #diag pre{ margin:0; padding:10px 12px 14px; overflow:auto; flex:1; font:inherit; font-size:11px;
+             line-height:1.5; color:var(--fg); white-space:pre-wrap; word-break:break-word; }
+  #diag pre::-webkit-scrollbar{ width:8px; }
+  #diag pre::-webkit-scrollbar-thumb{ background:rgba(120,160,220,.2); border-radius:4px; }
+
   #err{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); padding:16px 18px;
         max-width:70vw; max-height:70vh; overflow:auto; white-space:pre-wrap; color:#ff9a9a;
         display:none; font-size:11px; }
@@ -152,12 +173,14 @@
   <h1>noisefield</h1>
   <p>киньте трек в окно · или <span class="browse" id="browse">выберите файл</span></p>
   <p>для выступления — <span class="browse" id="go-live">линейный вход с пульта</span></p>
+  <p>звук компьютера — <span class="browse" id="go-sys">со всего экрана</span> · <span class="browse" id="go-tab">со вкладки</span></p>
+  <p class="note" id="intro-note"></p>
   <p style="font-size:11px;opacity:.55">без звука поле просто медленно течёт</p>
 </div>
 
 <div id="keys" class="glass">
   <b>tab</b> сцена · <b>g</b> панель · <b>p</b> палитра · <b>r</b> рандом · <b>h</b> метры<br>
-  <b>space</b> пауза · <b>←→</b> перемотка · <b>s</b> кадр · <b>v</b> запись · <b>t</b> транспорт · <b>f</b> фуллскрин
+  <b>space</b> пауза · <b>←→</b> перемотка · <b>s</b> кадр · <b>v</b> запись · <b>t</b> транспорт · <b>f</b> фуллскрин · <b>d</b> тракт
 </div>
 
 <div id="hud" class="glass">
@@ -166,7 +189,7 @@
   <div class="row"><span class="lbl">high</span><span class="bar"><i class="fill" id="f-high"></i></span></div>
   <div class="row"><span class="lbl">energy</span><span class="bar"><i class="fill" id="f-energy"></i></span></div>
   <div class="row"><span class="lbl">kick</span><span class="bar"><i class="fill hot" id="f-pulse"></i></span></div>
-  <div class="meta"><b id="m-src">нет сигнала</b><br><span id="m-perf">—</span></div>
+  <div class="meta"><b id="m-src">нет сигнала</b><br><span id="m-sig"></span><span id="m-perf">—</span></div>
 </div>
 
 <div id="panel" class="glass">
@@ -181,6 +204,11 @@
   <span id="t-time">0:00 / 0:00</span>
   <select id="live-dev" class="gone" title="вход"></select>
   <span id="t-rec" class="off">●</span>
+</div>
+
+<div id="diag" class="glass gone">
+  <header><b>ЗВУКОВОЙ ТРАКТ</b><span class="act" id="d-copy">скопировать</span></header>
+  <pre id="d-body"></pre>
 </div>
 
 <div id="err" class="glass"></div>
@@ -2132,6 +2160,8 @@ const LIVE_CAL  = 1720;                    // окно калибровки, ~20
 
 const LIVE = {
   on: false, stream: null, src: null, node: null, deviceId: null, label: '',
+  kind: '', surface: '', warn: '', mod: false,
+  startedAt: 0, frames: 0, level: 0, peak: 0, loudAt: 0, kicks: 0,
   head: 0, seen: 0, read: -1,
   bands: new Float32Array(LIVE_RING*SPEC_BINS),
   flux:  new Float32Array(LIVE_RING),
@@ -2201,7 +2231,11 @@ class NFA extends AudioWorkletProcessor {
       if (k < 10){ const d = v - this.prev[k]; if (d > 0) fx += d; }
       this.prev[k] = v;
     }
-    this.port.postMessage({ b: out, f: fx }, [out.buffer]);
+    // Пик окна — единственный способ отличить «вход открыт и молчит» от
+    // «вход открыт и играет». Полосы для этого не годятся: они нормированы.
+    let pk = 0;
+    for (let i = 0; i < W; i++){ const v = this.buf[i] < 0 ? -this.buf[i] : this.buf[i]; if (v > pk) pk = v; }
+    this.port.postMessage({ b: out, f: fx, p: pk }, [out.buffer]);
   }
   process(inputs){
     const ch = inputs[0];
@@ -2281,30 +2315,220 @@ function livePeak(n, wf){
   return v - thr;
 }
 
-async function startLive(deviceId){
+/* ── Откуда берётся звук ───────────────────────────────────────────────────
+   Дорог три, и это именно разные дороги, а не три кнопки к одному месту:
+   линейный вход с пульта (getUserMedia на устройстве), звук всего
+   компьютера (getDisplayMedia — под капотом петля WASAPI на АКТИВНОМ
+   устройстве вывода) и звук вкладки (тот же getDisplayMedia, но поверхность
+   другая и петля не используется, поэтому он работает там, где петли нет).
+
+   Отказывает каждая по-своему и молча: имени ошибки оператор не видит, а
+   «не получилось» лечению не помогает. Поэтому каждая попытка пишется в
+   журнал, а отказ превращается в указание — что нажать в диалоге или
+   включить в системе. */
+
+/* nf-live:begin — этот кусок вырезает tests/live.html и гоняет на
+   подменённом media-API, поэтому он не знает ни про AudioContext, ни про
+   сцену: только добыть поток и объяснить отказ. */
+
+// Петлевой вход отличается от микрофона только названием: отдельного
+// признака у него в API нет.
+const LOOPBACK_RE = /stereo ?mix|стерео ?микшер|what ?u ?hear|wave ?out|loopback|cable ?output|voicemeeter|virtual ?audio|микшер/i;
+const isLoopback = d => LOOPBACK_RE.test((d && d.label) || '');
+
+// Журнал попыток. Последняя ошибка бесполезна: важно, какая попытка с какими
+// условиями докуда дошла.
+const SRCLOG = { tries: [], devices: [], deviceAt: 0 };
+function logTry(way, want, err){
+  SRCLOG.tries.push({ at: Date.now(), way, want, ok: !err,
+                      name: err ? (err.name || 'Error') : '',
+                      message: err ? (err.message || '') : '' });
+  if (SRCLOG.tries.length > 32) SRCLOG.tries.shift();
+  return err;
+}
+
+// Отказы, которые смягчением условий не лечатся: человек нажал «отмена»,
+// страница не по https, устройства нет вовсе.
+const isHard = e => !!e && (e.name === 'NotAllowedError' || e.name === 'SecurityError'
+                         || e.name === 'NotFoundError');
+// Устройство исчезло между списком и открытием — это не отказ, а повод молча
+// взять то, что осталось.
+const isGone = e => !!e && (e.name === 'OverconstrainedError' || e.name === 'NotFoundError');
+
+class SourceError extends Error {
+  constructor(msg, cause){ super(msg); this.name = 'SourceError'; this.cause = cause || null; }
+}
+
+const media = () => (typeof navigator !== 'undefined' && navigator.mediaDevices) || null;
+
+function dropStream(stream){
+  if (!stream || !stream.getTracks) return;
+  for (const t of stream.getTracks()){ t.onended = null; try{ t.stop(); }catch(e){} }
+}
+
+async function listInputs(){
+  const md = media();
+  if (!md || !md.enumerateDevices) return [];
+  const ins = (await md.enumerateDevices()).filter(d => d.kind === 'audioinput');
+  SRCLOG.devices = ins.map(d => ({ deviceId: d.deviceId, label: d.label || '',
+                                   groupId: d.groupId || '', loop: isLoopback(d) }));
+  SRCLOG.deviceAt = Date.now();
+  return ins;
+}
+
+/* Обработку тракта выключаем осознанно: автогромкость съедает динамику,
+   шумодав и эхоподавление — транзиенты. Но «Стерео микшер» не микрофон, у
+   него своя дорога внутри Windows, и с такими условиями система может не
+   открыть его вовсе — а браузер в этом случае отказывает целиком. Поэтому
+   условия просятся, а не требуются: три запроса по убыванию притязаний. */
+const deviceShapes = id => [
+  { deviceId: id ? { exact: id } : undefined,
+    echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 },
+  { deviceId: id ? { exact: id } : undefined,
+    echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+  id ? { deviceId: { exact: id } } : true,
+];
+
+async function openDevice(deviceId, kind){
+  const md = media();
+  if (!md || !md.getUserMedia) throw new SourceError('браузер не отдаёт входы');
+  const shapes = deviceShapes(deviceId);
+  let last = null;
+  for (let i = 0; i < shapes.length; i++){
+    try {
+      const stream = await md.getUserMedia({ audio: shapes[i], video: false });
+      logTry('getUserMedia', shapes[i], null);
+      const tr = stream.getAudioTracks()[0];
+      const st = tr && tr.getSettings ? tr.getSettings() : {};
+      // Голый запрос мог открыть вход с включённой обработкой. Это работает,
+      // но реакция на удары будет заметно хуже — про это надо сказать.
+      const dirty = !!(st.autoGainControl || st.noiseSuppression || st.echoCancellation);
+      return { stream, kind: kind || 'device', shape: i,
+               label: (tr && tr.label) || (kind === 'loopback' ? 'петлевой вход' : 'линейный вход'),
+               warn: dirty ? 'обработка тракта осталась включённой: автогромкость сгладит удары' : '' };
+    } catch(e){
+      last = logTry('getUserMedia', shapes[i], e);
+      if (isHard(e)) break;
+    }
+  }
+  // Просили конкретный вход, а его больше нет — берём умолчание, молча.
+  if (deviceId && isGone(last)) return openDevice(null, kind);
+  if (kind === 'loopback')
+    throw new SourceError('петля не открылась — звук идёт мимо аналогового выхода?', last);
+  throw new SourceError(last && last.name === 'NotAllowedError'
+    ? 'доступ ко входу не разрешён' : 'вход не открылся', last);
+}
+
+// Петлевой вход как обходной путь к звуку всего компьютера.
+async function openLoopback(){
+  const d = (await listInputs()).find(isLoopback);
+  if (!d) throw new SourceError('петлевого входа в системе нет: включите «Стерео микшер» или поставьте виртуальный кабель');
+  const r = await openDevice(d.deviceId, 'loopback');
+  r.label = d.label || 'петлевой вход';
+  return r;
+}
+
+/* Прямой путь. Ограничений на сигнал в запросе нет вовсе: браузер обязан их
+   выполнить и, не сумев, роняет захват целиком — отдать его частично он не
+   умеет. Остаётся только то, что правит диалогом. Частоту кадров ненужного
+   видео сбавляем уже после старта, где отказ ничего не стоит. */
+const displayTries = surface => [
+  { video: { displaySurface: surface }, audio: true,
+    systemAudio: 'include', selfBrowserSurface: 'exclude' },
+  { video: true, audio: true },
+];
+
+const surfaceOf = stream => {
+  const v = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+  const st = v && v.getSettings ? v.getSettings() : {};
+  return st.displaySurface || '';
+};
+
+// Почему звука нет — зависит от выбранной поверхности, и лечится это тремя
+// разными действиями. Одна фраза на все случаи не стоит ничего.
+const noAudioReason = surface =>
+  surface === 'window'  ? 'у окна звука нет — выберите «Весь экран»' :
+  surface === 'browser' ? 'у вкладки не отмечена галка со звуком' :
+                          'нужна галка «Также поделиться звуком системы»';
+
+const SURFACE_RU = { monitor: 'звук со всего экрана', browser: 'звук вкладки',
+                     window: 'звук окна', '': 'звук с экрана' };
+
+async function openDisplay(want){
+  const md = media();
+  if (!md || !md.getDisplayMedia) throw new SourceError('браузер не умеет захват звука с экрана');
+  const tries = displayTries(want === 'tab' ? 'browser' : 'monitor');
+  let stream = null, last = null;
+  for (const opt of tries){
+    try { stream = await md.getDisplayMedia(opt); logTry('getDisplayMedia', opt, null); break; }
+    catch(e){ last = logTry('getDisplayMedia', opt, e); if (isHard(e)) break; }
+  }
+  if (!stream) throw new SourceError(last && last.name === 'NotAllowedError'
+    ? 'захват экрана отменён' : 'захват экрана не начался', last);
+
+  const surface = surfaceOf(stream);
+  if (!stream.getAudioTracks().length){
+    // Без звука сеанс не нужен, а полоска «вы делитесь экраном» висела бы.
+    dropStream(stream);
+    throw new SourceError(noAudioReason(surface));
+  }
+  // Видеодорожку не останавливаем: в Chrome на ней держится весь сеанс
+  // шаринга, и stop() закрыл бы захват вместе со звуком. Гасим только кадры.
+  const v = stream.getVideoTracks()[0];
+  if (v && v.applyConstraints){ try { v.applyConstraints({ frameRate: 1 }); } catch(e){} }
+  return { stream, kind: 'display', surface, shape: 0,
+           label: SURFACE_RU[surface] || SURFACE_RU[''],
+           warn: surface === 'browser' ? 'это звук одной вкладки, а не всего компьютера'
+               : surface === 'window'  ? 'звук окна: система целиком сюда не попадёт' : '' };
+}
+
+/* «Звук с компьютера» — просьба, а не выбор API: просили звук, а не
+   getDisplayMedia. Прямой путь отказал, но в системе есть петлевой вход —
+   идём через него и говорим об этом вслух. Отмену не обходим: человек
+   сказал «нет», а не «попробуй иначе». */
+async function openComputer(){
+  try { return await openDisplay('screen'); }
+  catch(e){
+    if (e && e.cause && e.cause.name === 'NotAllowedError') throw e;
+    try {
+      const r = await openLoopback();
+      r.warn = 'через петлевой вход: ' + e.message;
+      return r;
+    } catch(e2){ throw new SourceError(e.message + ' · ' + e2.message, e.cause || null); }
+  }
+}
+
+// Разбор входа. Одно место на все дороги: забытая дорожка держит индикатор
+// захвата, забытая нода — процессор.
+function disposeSource(L){
+  if (L.node){ try{ L.node.port.onmessage = null; }catch(e){} try{ L.node.disconnect(); }catch(e){} }
+  if (L.src){ try{ L.src.disconnect(); }catch(e){} }
+  dropStream(L.stream);
+  L.node = null; L.src = null; L.stream = null;
+}
+
+/* nf-live:end */
+
+// Общий вход для всех дорог: поток уже добыт, дальше он всем один.
+async function useSource(src){
   ac = ac || new (window.AudioContext || window.webkitAudioContext)();
   await ac.resume();
-  // Обработка микрофонного тракта убивает ровно то, на чём всё держится:
-  // автогромкость съедает динамику, шумодав и эхоподавление — транзиенты.
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      deviceId: deviceId ? { exact: deviceId } : undefined,
-      echoCancellation: false, noiseSuppression: false, autoGainControl: false,
-      channelCount: 2,
-    }, video: false });
   stopLive(true);
   stopPlayback(); TRACK = null; audioBuf = null;
   buildGraph();
-  if (!LIVE.node){
+  if (!LIVE.mod){
     const url = URL.createObjectURL(new Blob([LIVE_WORKLET], { type: 'text/javascript' }));
     await ac.audioWorklet.addModule(url);
     URL.revokeObjectURL(url);
+    LIVE.mod = true;                       // модуль регистрируется один раз на контекст
   }
   LIVE.head = 0; LIVE.seen = 0; LIVE.read = -1; LIVE.dyn = null; LIVE.cal = 0;
   LIVE.sal.length = 0; LIVE.salRef = 1e-6; LIVE.lastKickFrame = -1e9; LIVE.bpmHits.length = 0;
   LIVE.norm.fill(1e-4);
-  LIVE.stream = stream;
-  LIVE.src = ac.createMediaStreamSource(stream);
+  LIVE.frames = 0; LIVE.level = 0; LIVE.peak = 0; LIVE.loudAt = 0; LIVE.kicks = 0;
+  LIVE.startedAt = performance.now();
+  LIVE.stream = src.stream;
+  LIVE.src = ac.createMediaStreamSource(src.stream);
   LIVE.node = new AudioWorkletNode(ac, 'nfa');
   LIVE.node.port.onmessage = e => {
     const h = LIVE.head;
@@ -2313,35 +2537,83 @@ async function startLive(deviceId){
     const b = liveGroup(h, B_BASS), m = liveGroup(h, B_MID), g = liveGroup(h, B_HIGH);
     LIVE.gb[h % LIVE_RING] = b; LIVE.gm[h % LIVE_RING] = m; LIVE.gh[h % LIVE_RING] = g;
     LIVE.ge[h % LIVE_RING] = b*0.5 + m*0.35 + g*0.15;
-    LIVE.head = h + 1; LIVE.seen++;
+    LIVE.head = h + 1; LIVE.seen++; LIVE.frames++;
+    // Уровень нужен не картинке, а ответу на вопрос «а звук-то идёт?».
+    LIVE.level = e.data.p || 0;
+    if (LIVE.level > LIVE.peak) LIVE.peak = LIVE.level;
+    if (LIVE.level > 1e-3) LIVE.loudAt = performance.now();
   };
   LIVE.src.connect(LIVE.node);
   LIVE.src.connect(hub);
-  // Сигнал с пульта в динамики не возвращаем: он и так звучит в зале.
+  // Сигнал с пульта в динамики не возвращаем: он и так звучит в зале. Звук
+  // компьютера — тем более: вернёшь его в те же колонки и получишь петлю.
   outGain.gain.value = 0;
-  const tr = stream.getAudioTracks()[0];
-  LIVE.label = (tr && tr.label) || 'линейный вход';
-  LIVE.deviceId = tr && tr.getSettings ? tr.getSettings().deviceId : deviceId;
+  const tr = src.stream.getAudioTracks()[0];
+  LIVE.label = src.label || (tr && tr.label) || 'вход';
+  LIVE.deviceId = tr && tr.getSettings ? tr.getSettings().deviceId : null;
+  LIVE.kind = src.kind; LIVE.surface = src.surface || ''; LIVE.warn = src.warn || '';
   LIVE.on = true; playing = true;
+  // Показ останавливают и родной полоской браузера. Это тоже выход, и он
+  // должен возвращать на заставку, а не оставлять мёртвый граф.
+  for (const t of src.stream.getTracks()) t.onended = () => liveEnded();
   intro.classList.add('gone');
   transport.classList.remove('gone');
   document.body.classList.add('playing');
   const sel = document.getElementById('live-dev');
   if (sel){
-    sel.classList.remove('gone');
-    sel.onchange = () => startLive(sel.value).then(l => { mSrc.textContent = l; tName.textContent = l; });
+    // У захвата экрана списка входов нет: там источник выбирают в диалоге.
+    sel.classList.toggle('gone', src.kind === 'display');
+    sel.onchange = () => startLive(sel.value).catch(showSourceError);
   }
-  liveDevices();
+  if (src.kind !== 'display') liveDevices();
+  showSource();
   return LIVE.label;
 }
 
+// Линейный вход с пульта или конкретное устройство из списка.
+async function startLive(deviceId){
+  return useSource(await openDevice(deviceId || null, 'device'));
+}
+
 function stopLive(keepGraph){
-  if (LIVE.node){ try{ LIVE.node.port.onmessage = null; LIVE.node.disconnect(); }catch(e){} }
-  if (LIVE.src) { try{ LIVE.src.disconnect(); }catch(e){} }
-  if (LIVE.stream) LIVE.stream.getTracks().forEach(t => t.stop());
-  LIVE.stream = null; LIVE.src = null; LIVE.on = false;
+  disposeSource(LIVE);
+  LIVE.on = false;
   if (!keepGraph && outGain) outGain.gain.value = 1;
   if (!keepGraph) playing = false;
+}
+
+// Показ остановлен снаружи — полоской браузера, выдернутым проводом,
+// уснувшим устройством. Возвращаемся на заставку без зависших дорожек.
+function liveEnded(){
+  if (!LIVE.on) return;
+  stopLive(false);
+  document.body.classList.remove('playing');
+  transport.classList.add('gone');
+  intro.classList.remove('gone');
+  const sel = document.getElementById('live-dev');
+  if (sel) sel.classList.add('gone');
+  mSrc.textContent = 'нет сигнала'; mSrc.title = '';
+  tName.textContent = '—';
+  note('вход закрыт');
+}
+
+const introNote = document.getElementById('intro-note');
+const note = t => { introNote.textContent = t || ''; };
+
+function showSource(){
+  mSrc.textContent = LIVE.label;
+  mSrc.title = LIVE.warn || '';
+  tName.textContent = LIVE.label + (LIVE.warn ? '  ·  ' + LIVE.warn : '');
+  note('');
+}
+
+// Отказ показываем целиком: человеку — что делать, диагностике — имя ошибки.
+function showSourceError(e){
+  const msg = (e && e.message) || 'вход не открылся';
+  mSrc.textContent = msg;
+  mSrc.title = e && e.cause ? (e.cause.name + ': ' + (e.cause.message || '')) : '';
+  note(msg + '  ·  d — диагностика');
+  console.error(e);
 }
 
 // Разбор живого потока. Отличий от файла ровно два: кадры берутся из кольца
@@ -2367,6 +2639,7 @@ function analyzeFromLive(dt){
       const q = LIVE.sal.slice().sort((a,b)=>a-b);
       LIVE.salRef = Math.max(q[Math.floor(q.length*0.90)], 1e-6);
       fire(0, kickWeight(Math.min(1.6, sal/LIVE.salRef), L.gK));
+      LIVE.kicks++;
       const t = n*HOP/ac.sampleRate;
       LIVE.bpmHits.push(t);
       while (LIVE.bpmHits.length && t - LIVE.bpmHits[0] > 12) LIVE.bpmHits.shift();
@@ -2413,16 +2686,16 @@ function analyzeFromLive(dt){
 // Список входов. Метки устройств браузер отдаёт только после разрешения,
 // поэтому обновляем их ещё раз уже после старта.
 async function liveDevices(){
-  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
-  const all = await navigator.mediaDevices.enumerateDevices();
-  const ins = all.filter(d => d.kind === 'audioinput');
+  const ins = await listInputs();
   const sel = document.getElementById('live-dev');
   if (sel){
     sel.innerHTML = '';
     for (const d of ins){
       const o = document.createElement('option');
       o.value = d.deviceId;
-      o.textContent = d.label || ('вход ' + (sel.children.length + 1));
+      // Петлевой вход помечаем стрелкой: по названию «CABLE Output» никто не
+      // догадается, что это и есть «что слышно».
+      o.textContent = (isLoopback(d) ? '↻ ' : '') + (d.label || ('вход ' + (sel.children.length + 1)));
       if (d.deviceId === LIVE.deviceId) o.selected = true;
       sel.appendChild(o);
     }
@@ -2542,20 +2815,21 @@ function toggleRecording(){
 
 const fileInput = document.getElementById('file');
 document.getElementById('browse').onclick = () => fileInput.click();
-document.getElementById('go-live').onclick = async () => {
-  const el = document.getElementById('go-live');
+// Три точки входа вместо одной: звук вкладки — не звук компьютера, и
+// получать его случайно, вместо системного, хуже, чем выбрать осознанно.
+async function enterLive(el, busy, open){
   const was = el.textContent;
-  el.textContent = 'разрешите доступ ко входу…';
-  try{
-    const label = await startLive(null);
-    mSrc.textContent = label;
-    tName.textContent = label;
-  } catch(e){
-    el.textContent = was;
-    mSrc.textContent = 'вход недоступен';
-    console.error(e);
-  }
-};
+  el.textContent = busy; note('');
+  try { await useSource(await open()); }
+  catch(e){ showSourceError(e); }
+  finally { el.textContent = was; }
+}
+document.getElementById('go-live').onclick = e =>
+  enterLive(e.currentTarget, 'разрешите доступ ко входу…', () => openDevice(null, 'device'));
+document.getElementById('go-sys').onclick = e =>
+  enterLive(e.currentTarget, 'выберите «Весь экран» и галку со звуком…', openComputer);
+document.getElementById('go-tab').onclick = e =>
+  enterLive(e.currentTarget, 'выберите вкладку и галку со звуком…', () => openDisplay('tab'));
 fileInput.onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); };
 addEventListener('dragover',  e => { e.preventDefault(); document.body.classList.add('drag'); });
 addEventListener('dragleave', () => document.body.classList.remove('drag'));
@@ -2921,6 +3195,98 @@ setRefs(refs);
 applySceneLabels();
 applyName();
 
+/* ── Диагностика звукового тракта (клавиша d) ──────────────────────────────
+   Отлаживать приходится на чужой машине и по одному сообщению. Значит всё,
+   что нужно для диагноза, должно собираться в один текст, который человек
+   копирует одной кнопкой: входы, чем открыт активный, что говорят настройки
+   дорожки, история попыток — и отдельной строкой самое неочевидное: идёт ли
+   вообще сигнал. Тишина на открытом устройстве и закрытое устройство
+   выглядят одинаково, а лечатся по-разному. */
+
+const diag = document.getElementById('diag'), dBody = document.getElementById('d-body');
+const dbs   = v => v > 1e-6 ? (20*Math.log10(v)).toFixed(0) + ' dB' : '−∞';
+const msf   = v => (typeof v === 'number' && isFinite(v)) ? (v*1000).toFixed(1) + ' мс' : '—';
+const cut   = v => v ? String(v).slice(0, 8) + '…' : '—';
+
+// «Устройство открылось» и «сигнал идёт» — разные состояния, и разводить их
+// приходится по времени: кадров нет / кадры идут, но пусты / всё хорошо.
+function sigState(){
+  if (!LIVE.on) return { on: false, bad: false, text: 'вход не открыт' };
+  const since = (performance.now() - LIVE.startedAt)/1000;
+  if (!LIVE.frames)
+    return { on: true, bad: since > 1.5, text: since > 1.5 ? 'вход открыт, кадры не идут' : 'ждём первые кадры' };
+  const quiet = (performance.now() - (LIVE.loudAt || LIVE.startedAt))/1000;
+  if (quiet > 1.5)
+    return { on: true, bad: true, text: 'вход открыт, но молчит ' + quiet.toFixed(0) + ' с' };
+  return { on: true, bad: false, text: 'сигнал идёт · ' + dbs(LIVE.level) };
+}
+
+function trackLines(t){
+  const st = t.getSettings ? t.getSettings() : {};
+  const keys = ['deviceId','groupId','displaySurface','sampleRate','channelCount',
+                'echoCancellation','noiseSuppression','autoGainControl','latency'];
+  const kv = keys.filter(k => st[k] !== undefined)
+                 .map(k => k + '=' + (k === 'deviceId' || k === 'groupId' ? cut(st[k]) : st[k]));
+  return ['  ' + t.kind + ' «' + (t.label || 'без метки') + '» ' + t.readyState +
+          (t.enabled ? '' : ' · выключена'),
+          '    ' + (kv.join(' ') || 'настроек нет')];
+}
+
+function diagText(){
+  const L = [];
+  const s = sigState();
+  L.push('noisefield · звуковой тракт · ' + new Date().toLocaleTimeString('ru-RU'));
+  L.push(navigator.userAgent);
+  L.push('');
+  L.push('СИГНАЛ: ' + s.text);
+  if (LIVE.on)
+    L.push('  кадров ' + LIVE.frames + ' · ударов ' + LIVE.kicks + ' · пик ' + dbs(LIVE.peak) +
+           ' · калибровка ' + ((LIVE.cal*100)|0) + '%' + (LIVE.bpm ? ' · ' + LIVE.bpm + ' bpm' : ''));
+  L.push('');
+  const kindRu = { display: 'захват экрана', loopback: 'петлевой вход', device: 'устройство' };
+  L.push('ИСТОЧНИК: ' + (LIVE.on ? (kindRu[LIVE.kind] || LIVE.kind) +
+         (LIVE.surface ? ' · поверхность ' + LIVE.surface : '') : 'не открыт'));
+  if (LIVE.on){
+    L.push('  подпись: ' + LIVE.label + (LIVE.warn ? '  ·  ' + LIVE.warn : ''));
+    if (LIVE.stream) for (const t of LIVE.stream.getTracks()) L.push.apply(L, trackLines(t));
+  }
+  L.push('');
+  L.push('AudioContext: ' + (ac ? ac.state + ' · ' + ac.sampleRate + ' Гц · base ' + msf(ac.baseLatency) +
+                                  ' · out ' + msf(ac.outputLatency) : 'не создан'));
+  L.push('');
+  L.push('ВХОДЫ (' + SRCLOG.devices.length + '):');
+  if (!SRCLOG.devices.length) L.push('  список пуст — метки браузер отдаёт только после разрешения');
+  for (const d of SRCLOG.devices)
+    L.push('  ' + (d.loop ? '↻ ' : '  ') + (d.label || 'без метки') +
+           '  id=' + cut(d.deviceId) + ' grp=' + cut(d.groupId));
+  L.push('');
+  L.push('ПОПЫТКИ ОТКРЫТЬ ВХОД (' + SRCLOG.tries.length + '):');
+  if (!SRCLOG.tries.length) L.push('  ни одной');
+  for (const t of SRCLOG.tries){
+    L.push('  ' + new Date(t.at).toLocaleTimeString('ru-RU') + ' ' + t.way + ' ' + JSON.stringify(t.want));
+    L.push('    → ' + (t.ok ? 'открылся' : t.name + ': ' + t.message));
+  }
+  return L.join('\n');
+}
+
+const diagOpen = () => !diag.classList.contains('gone');
+function refreshDiag(){ if (diagOpen()) dBody.textContent = diagText(); }
+function toggleDiag(){
+  diag.classList.toggle('gone');
+  if (diagOpen()){ refreshDiag(); listInputs().then(refreshDiag).catch(() => {}); }
+}
+document.getElementById('d-copy').onclick = async () => {
+  const el = document.getElementById('d-copy');
+  try { await navigator.clipboard.writeText(diagText()); el.textContent = 'скопировано'; }
+  catch(e){
+    // Без https буфер обмена недоступен — тогда хотя бы выделяем текст.
+    const r = document.createRange(); r.selectNodeContents(dBody);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    el.textContent = 'выделено — ctrl+c';
+  }
+  setTimeout(() => { el.textContent = 'скопировать'; }, 1600);
+};
+
 const panel = document.getElementById('panel');
 const hud   = document.getElementById('hud');
 const keys  = document.getElementById('keys');
@@ -2933,6 +3299,7 @@ addEventListener('keydown', e => {
   else if (e.key === 'p'){ cyclePalette(); }
   else if (e.key === 'r'){ randomize(); }
   else if (e.key === 'h'){ hud.classList.toggle('gone'); keys.classList.toggle('gone'); }
+  else if (e.key === 'd'){ toggleDiag(); }
   else if (e.key === 'f'){ document.fullscreenElement ? document.exitFullscreen() : document.body.requestFullscreen(); }
   else if (e.key === 's'){ wantShot = true; }
   else if (e.key === 'v'){ toggleRecording(); }
@@ -2950,7 +3317,7 @@ addEventListener('keydown', e => {
 
 const fills = {bass:'f-bass', mid:'f-mid', high:'f-high', energy:'f-energy', pulse:'f-pulse'};
 for (const k in fills) fills[k] = document.getElementById(fills[k]);
-const mPerf = document.getElementById('m-perf');
+const mPerf = document.getElementById('m-perf'), mSig = document.getElementById('m-sig');
 
 let last = performance.now()/1000, T = 0, fps = 60, hudAt = 0;
 
@@ -3083,6 +3450,10 @@ function frame(){
   if (now - hudAt > 0.06){
     hudAt = now;
     for (const k in fills) fills[k].style.width = Math.min(100, F[k]*100/(k==='pulse'?1.6:1)) + '%';
+    const sig = sigState();
+    mSig.textContent = sig.on ? sig.text : '';
+    mSig.className = sig.on ? (sig.bad ? 'bad' : 'on') : '';
+    if (diagOpen()) refreshDiag();
     mPerf.textContent = `${W}×${H} · ${fps.toFixed(0)} fps`
       + (autoScale < 0.99 ? ` · авто ${(autoScale*100)|0}%` : '')
       + ` · ${kickCount} kicks`;
