@@ -181,6 +181,19 @@
   body.learn .ctl:not(.wide):hover{ background:rgba(110,168,255,.10); border-radius:4px; }
   .ctl.learning{ background:rgba(255,154,110,.18); border-radius:4px; }
 
+  /* ---- чистый экран ---- */
+  /* Прячет весь интерфейс разом, не трогая, что было открыто: по возврату
+     панель, метры и транспорт встают ровно как стояли. */
+  body.clean #intro, body.clean #keys, body.clean #hud, body.clean #panel,
+  body.clean #transport, body.clean #diag{ opacity:0 !important; visibility:hidden;
+      pointer-events:none !important; transition:opacity .25s, visibility 0s .25s; }
+  /* Курсор тоже часть интерфейса — пропадает, когда мышь замерла. */
+  body.clean.idle, body.clean.idle *{ cursor:none !important; }
+  #toast{ position:fixed; left:50%; top:14px; transform:translateX(-50%); padding:6px 12px;
+          color:var(--dim); font-size:11px; opacity:0; pointer-events:none; transition:opacity .3s; }
+  #toast.on{ opacity:1; }
+  #toast b{ color:#a8bcd8; font-weight:500; }
+
   #err{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); padding:16px 18px;
         max-width:70vw; max-height:70vh; overflow:auto; white-space:pre-wrap; color:#ff9a9a;
         display:none; font-size:11px; }
@@ -200,8 +213,10 @@
 
 <div id="keys" class="glass">
   <b>tab</b> сцена · <b>g</b> панель · <b>p</b> палитра · <b>r</b> рандом · <b>h</b> метры<br>
-  <b>space</b> пауза · <b>←→</b> перемотка · <b>s</b> кадр · <b>v</b> запись · <b>t</b> транспорт · <b>f</b> фуллскрин · <b>d</b> тракт · <b>m</b> midi-обучение
+  <b>space</b> пауза · <b>←→</b> перемотка · <b>s</b> кадр · <b>v</b> запись · <b>t</b> транспорт · <b>f</b> фуллскрин · <b>d</b> тракт · <b>m</b> midi-обучение · <b>i</b> скрыть интерфейс
 </div>
+
+<div id="toast" class="glass"></div>
 
 <div id="hud" class="glass">
   <div class="row"><span class="lbl">bass</span><span class="bar"><i class="fill" id="f-bass"></i></span></div>
@@ -4073,25 +4088,73 @@ const panel = document.getElementById('panel');
 const hud   = document.getElementById('hud');
 const keys  = document.getElementById('keys');
 panel.classList.add('gone');
+
+/* Чистый экран: весь интерфейс уходит одним нажатием, остаётся только поле.
+   Возврат — той же клавишей или Esc. Клавиши, которые что-то показывают
+   (g, h, t, d, m), сначала выводят из чистого режима и показывают своё:
+   переключать невидимое бессмысленно. */
+const toast = document.getElementById('toast');
+let clean = false, toastTimer = 0, idleTimer = 0;
+function showToast(html){
+  toast.innerHTML = html; toast.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('on'), 1800);
+}
+function setClean(on){
+  if (clean === on) return;
+  clean = on;
+  document.body.classList.toggle('clean', on);
+  document.body.classList.remove('idle');
+  clearTimeout(idleTimer);
+  if (on){
+    idleTimer = setTimeout(() => document.body.classList.add('idle'), 1500);
+    showToast('интерфейс скрыт · <b>i</b> или <b>esc</b> — вернуть');
+  } else {
+    toast.classList.remove('on');
+  }
+}
+addEventListener('mousemove', () => {
+  if (!clean) return;
+  document.body.classList.remove('idle');
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => document.body.classList.add('idle'), 1500);
+});
+// Показать элемент, если чистый режим его прятал; иначе обычный переключатель.
+function reveal(toggle, els){
+  if (!clean){ toggle(); return; }
+  setClean(false);
+  if (els.some(el => el.classList.contains('gone'))) toggle();
+}
+
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
   if (e.code === 'Space'){ e.preventDefault(); if (!LIVE.on) togglePlayback(); }
   else if (e.code === 'Tab'){ e.preventDefault(); cycleScene(); }
-  else if (e.key === 'g'){ panel.classList.toggle('gone'); }
+  else if (e.key === 'i'){ setClean(!clean); }
+  else if (e.key === 'g'){ reveal(() => panel.classList.toggle('gone'), [panel]); }
   else if (e.key === 'p'){ cyclePalette(); }
   else if (e.key === 'r'){ randomize(); }
-  else if (e.key === 'h'){ hud.classList.toggle('gone'); keys.classList.toggle('gone'); }
-  else if (e.key === 'd'){ toggleDiag(); }
-  else if (e.key === 'm'){ midiLearn(!MIDI.learn); }
+  else if (e.key === 'h'){
+    reveal(() => {
+      // Метры и подсказку держим в одном состоянии, даже если разошлись.
+      const hide = !hud.classList.contains('gone');
+      hud.classList.toggle('gone', hide); keys.classList.toggle('gone', hide);
+    }, [hud]);
+  }
+  else if (e.key === 'd'){ reveal(toggleDiag, [diag]); }
+  else if (e.key === 'm'){ setClean(false); midiLearn(!MIDI.learn); }
   else if (e.key === 'Escape' && MIDI.learn){ midiLearn(false); }
+  else if (e.key === 'Escape' && clean){ setClean(false); }
   else if (e.key === 'f'){ document.fullscreenElement ? document.exitFullscreen() : document.body.requestFullscreen(); }
   else if (e.key === 's'){ wantShot = true; }
   else if (e.key === 'v'){ toggleRecording(); }
   // Ручной удар: когда детектор поплыл на бесформенном куске, бит ведут руками.
   else if (e.key === 'b'){ fire(0, kickWeight(1.0, punchLaw().gK)); }
   else if (e.key === 't'){
-    transport.classList.toggle('gone');
-    document.body.classList.toggle('playing', !transport.classList.contains('gone') && !!audioBuf);
+    reveal(() => {
+      transport.classList.toggle('gone');
+      document.body.classList.toggle('playing', !transport.classList.contains('gone') && !!audioBuf);
+    }, [transport]);
   }
   else if (e.code === 'ArrowLeft'){  e.preventDefault(); seekTo(position() - 5); }
   else if (e.code === 'ArrowRight'){ e.preventDefault(); seekTo(position() + 5); }
