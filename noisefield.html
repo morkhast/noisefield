@@ -161,6 +161,26 @@
   #diag pre::-webkit-scrollbar{ width:8px; }
   #diag pre::-webkit-scrollbar-thumb{ background:rgba(120,160,220,.2); border-radius:4px; }
 
+  /* ---- MIDI ---- */
+  .midi-st{ font-size:11px; color:var(--dim); margin:4px 0 2px; cursor:default; }
+  .midi-st.on{ color:var(--fg); }
+  .midi-st.on::before{ content:'● '; color:#6fdc8c; }
+  .midi-st.bad{ color:var(--hot); cursor:pointer; }
+  .prow button.on{ background:rgba(110,168,255,.28); border-color:var(--accent); color:#eaf1ff; }
+  .midi-list{ margin:6px 0 2px; font-size:10px; }
+  .midi-list div{ display:flex; gap:6px; align-items:center; padding:1px 0; color:var(--dim); }
+  .midi-list b{ color:var(--accent); font-weight:500; min-width:34px; }
+  .midi-list span{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .midi-list i{ font-style:normal; cursor:pointer; opacity:.45; }
+  .midi-list i:hover{ opacity:1; color:var(--hot); }
+  .midi-mon{ font-size:10px; color:var(--dim); min-height:15px; font-variant-numeric:tabular-nums; }
+  .ctl.gone{ display:none; }
+  /* Привязанный ползунок несёт имя органа; стрелка — куда крутить до подхвата. */
+  .ctl label[data-midi]::before{ content:attr(data-midi); color:var(--accent); font-size:9px; margin-right:4px; }
+  body.learn .ctl:not(.wide){ cursor:crosshair; }
+  body.learn .ctl:not(.wide):hover{ background:rgba(110,168,255,.10); border-radius:4px; }
+  .ctl.learning{ background:rgba(255,154,110,.18); border-radius:4px; }
+
   #err{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); padding:16px 18px;
         max-width:70vw; max-height:70vh; overflow:auto; white-space:pre-wrap; color:#ff9a9a;
         display:none; font-size:11px; }
@@ -180,7 +200,7 @@
 
 <div id="keys" class="glass">
   <b>tab</b> сцена · <b>g</b> панель · <b>p</b> палитра · <b>r</b> рандом · <b>h</b> метры<br>
-  <b>space</b> пауза · <b>←→</b> перемотка · <b>s</b> кадр · <b>v</b> запись · <b>t</b> транспорт · <b>f</b> фуллскрин · <b>d</b> тракт
+  <b>space</b> пауза · <b>←→</b> перемотка · <b>s</b> кадр · <b>v</b> запись · <b>t</b> транспорт · <b>f</b> фуллскрин · <b>d</b> тракт · <b>m</b> midi-обучение
 </div>
 
 <div id="hud" class="glass">
@@ -286,13 +306,13 @@ const FACTORY = [
                                       fill:.55, contrast:.35,
                                       defocus:.72, defRad:5.5, bloom:2.2, bloomThr:.05, bloomRad:5.0,
                                       chroma:1.3, grain:.30, exposure:1.35, vignette:.35, sat:1.25,
-                                      punch:0, dBass:.45, dMid:.35, dHigh:.25, dEnergy:.50 } },
+                                      punch:0, dBass:.45, dMid:.35, dHigh:.25, dEnergy:.50, warp:.30 } },
   { name:'пелена',  palette:12, cfg:{ persist:.92, fbZoom:1.002, fbRot:-.002, fbSwirl:.004,
                                       speed:.10, shape:.40, complexity:.30, density:.40,
                                       fill:.70, contrast:.16,
                                       defocus:.94, defRad:8.0, bloom:1.6, bloomThr:.02, bloomRad:4.0,
                                       chroma:.70, grain:.22, exposure:1.30, vignette:.55, sat:1.05,
-                                      punch:0, dBass:.30, dMid:.25, dHigh:.15, dEnergy:.35 } },
+                                      punch:0, dBass:.30, dMid:.25, dHigh:.15, dEnergy:.35, warp:.20 } },
   { name:'вихрь',   palette:10, cfg:{ twist:1.4, segments:3, persist:.50, fbSwirl:.05,
                                       complexity:.60, density:.45, contrast:.68, bloom:1.4 } },
   // сцена «облака»
@@ -348,6 +368,10 @@ const FACTORY = [
   { name:'гониометр',  scene:5, palette:2,  cfg:{ struct:.90, shape:.55, fill:.5,
                                                   contrast:.50, stretch:.55, bloom:1.7,
                                                   vignette:.50 } },
+  // эмблема
+  { name:'логотип', scene:7, palette:4, cfg:{ speed:.30, shape:.50, density:.40, fill:.45,
+                                             contrast:.70, stretch:.55, complexity:.45, struct:.55,
+                                             fold:.70, bloom:1.3, bloomThr:.35, vignette:.70, grain:.06 } },
 ];
 
 const SPEC = [
@@ -396,8 +420,9 @@ const SPEC = [
  ]},
  { id:'react', title:'РЕАКЦИЯ НА ЗВУК', items:[
    ['punch',   'бит ↔ мелодия',0,1,.001, .60],
-   ['lookAhead','упреждение, мс',0,300,1, 120],
+   ['lookAhead','упреждение, мс',0,300,1, 0],
    ['dBass',   'низ → удар',   0,2,.001, 1.0],
+   ['warp',    'пики → излом', 0,2,.001, 1.0],
    ['dMid',    'середина → форма',0,2,.001, 1.0],
    ['dHigh',   'верх → резкость',0,2,.001, 1.0],
    ['dEnergy', 'энергия → яркость',0,2,.001, 1.0],
@@ -407,6 +432,7 @@ const SPEC = [
    ['kickHold','пауза, с',    .05,.5,.001, .11],
    ['pulseDec','спад удара, с',.05,1,.001, .20],
  ]},
+ { id:'midi', title:'МИДИ', items:[{type:'midi'}] },
  { id:'perf', title:'ПРОИЗВОДИТЕЛЬНОСТЬ', items:[
    ['budget','потолок, Мп', .3,4,.05, 1.3],
  ]},
@@ -483,6 +509,29 @@ float snoise(vec3 v){
   return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
 }`;
 
+/* Излом на пиках — общий кусок для сцен с геометрией. Смещение пространства,
+   которое почти всё время стоит в нуле и включается только на самых сильных
+   ударах и самых громких местах трека. Крупный изгиб читается как удар по
+   форме, мелкая дрожь поверх — как её надлом; сплошная рябь была бы помехой.
+   Рисунок задаёт uWarpSeed: он меняется от удара к удару, но только когда
+   прежний излом уже погас, иначе форма перескакивает. */
+const WARP_GLSL = `
+uniform float uWarp, uWarpSeed;
+vec2 warpVec(vec2 p){
+  float s = uWarpSeed + uTime*0.4;
+  vec2 d1 = vec2(cos(uWarpSeed), sin(uWarpSeed));
+  vec2 d2 = vec2(-sin(uWarpSeed*1.3 + 0.7), cos(uWarpSeed*1.3 + 0.7));
+  return vec2(sin(dot(p, d1)*2.6 + s*3.1), sin(dot(p, d2)*2.2 + s*2.3))
+       + 0.2*vec2(sin(dot(p, d2)*7.0 + s), sin(dot(p, d1)*6.3 - s));
+}
+const float WARP_LIP = 2.6 + 0.2*7.0;        // наибольший наклон смещения
+vec3 warpVec3(vec3 p){
+  float s = uWarpSeed + uTime*0.4;
+  vec3 ph = vec3(s, s*1.3 + 1.7, s*0.7 + 3.1);
+  return sin(p.yzx*2.6 + ph) + 0.2*sin(p.zxy*7.0 - ph);
+}
+`;
+
 const FS_FIELD = `#version 300 es
 precision highp float;
 out vec4 outColor;
@@ -493,7 +542,7 @@ uniform float uSegments, uSymAngle, uTwist;
 uniform float uDMid, uDHigh, uDEnergy, uDBass, uVignette;
 uniform vec3  uBg, uShadow, uMid3, uAccent, uGlow;
 uniform int   uOctaves;
-` + NOISE + `
+` + NOISE + WARP_GLSL + `
 
 // Октавы нормируем на сумму амплитуд: иначе картинка прыгает по яркости
 // в тот момент, когда тянешь «сложность», и настраивать невозможно.
@@ -533,6 +582,9 @@ void main(){
   float kick = uPulse * uDBass;
   uv *= 1.0 - 0.10*kick;
   uv += uv * 0.045 * kick * sin(r*17.0 - uTime*3.0);
+
+  // Излом на пиках — до шума: сминается само пространство, в котором он лежит.
+  uv += uWarp * 0.085 * warpVec(uv*1.6);
 
   // --- само поле ---------------------------------------------------------
   float scale = mix(1.2, 5.2, uComplexity);
@@ -582,7 +634,7 @@ uniform float uDMid, uDHigh, uDEnergy, uDBass, uVignette;
 uniform vec3  uBg, uShadow, uMid3, uAccent, uGlow;
 uniform int   uOctaves;
 uniform sampler2D uSpec;
-` + NOISE + `
+` + NOISE + WARP_GLSL + `
 
 const float TAU = 6.28318530718;
 
@@ -603,6 +655,7 @@ float spec(float x){ return texture(uSpec, vec2(clamp(x, 0.0, 1.0), 0.5)).r; }
    силуэт облаков буквально и есть эквалайзер, а объём ему даёт марш сквозь
    трёхмерный шум. Солнце стоит ЗА валом, поэтому кромка светится на просвет. */
 float cloud(vec3 p, float sx, int oct){
+  p += uWarp * 0.32 * warpVec3(p*0.9);           // излом: вал на миг сминается
   float top = -0.80 + spec(sx) * uShape * 1.6;   // ниже кромка — больше неба
   // Плотно ниже кромки, мягко над ней. Контраст правит резкость среза.
   float m = smoothstep(top, top - mix(1.0, 0.22, uContrast), p.y);
@@ -696,7 +749,7 @@ uniform float uSegments, uSymAngle, uTwist;
 uniform float uDMid, uDHigh, uDEnergy, uDBass, uVignette, uNearClip, uFold, uStruct, uStretch;
 uniform vec3  uBg, uShadow, uMid3, uAccent, uGlow;
 uniform sampler2D uSpec;
-
+${WARP_GLSL}
 const float TAU = 6.28318530718;
 mat2 rot(float a){ float s = sin(a), c = cos(a); return mat2(c, -s, s, c); }
 
@@ -720,6 +773,19 @@ float mandelbox(vec3 p, float scale, float lim, float minR2, int iters){
 `;
 
 const MARCH_TAIL = `
+// Излом на пиках поверх любой сцены. Смещение портит оценку расстояния:
+// поле тянется до (1 + a·WARP_LIP) раз, и марш без поправки проскакивает
+// поверхность. Делим — шаг мельче, но только пока излом длится.
+float map(vec3 p){
+  if (uWarp < 0.002) return mapScene(p);
+  float a = uWarp * 0.035;
+  vec3 v = warpVec3(p);
+  // Анфас гнём только в плоскости: сдвиг по глубине разворачивает к камере
+  // плоские грани коробки, и поверх мандалы вылезают светлые плиты.
+  if (CAM_MODE == 1) v.z *= 0.25;
+  return mapScene(p + a*v) / (1.0 + a*WARP_LIP);
+}
+
 vec3 mapNormal(vec3 p){
   const vec2 k = vec2(1.0, -1.0);
   const float h = 0.0008;      // тетраэдр: четыре отсчёта вместо шести
@@ -901,7 +967,7 @@ void main(){
 const MAP_CITADEL = `
 const float CAM_R = 2.2, CAM_DRIFT = 0.0;   // радиус блуждания внутри фигуры
 const int   SHADE_EDGE = 0, CAM_MODE = 2;   // полёт внутри решётки
-float map(vec3 p){
+float mapScene(vec3 p){
   // Удар раздувает саму решётку. Точку делим на масштаб, а результат на него
   // умножаем — иначе оценка расстояния перестаёт быть верной и марш рвётся.
   float s = 1.0 + 0.06*uPulse*uDBass;
@@ -919,7 +985,7 @@ float map(vec3 p){
 const MAP_IDOL = `
 const float CAM_R = 4.3, CAM_DRIFT = 0.0;   // ближе: издали резьба уходит за пиксель
 const int   SHADE_EDGE = 0, CAM_MODE = 1;   // мандала смотрит в лоб
-float map(vec3 p){
+float mapScene(vec3 p){
   float seg = floor(3.0 + uDensity*9.0);
   float k = TAU / seg;
   float a = atan(p.y, p.x);
@@ -939,7 +1005,7 @@ float map(vec3 p){
 const MAP_ORACLE = `
 const float CAM_R = 2.6, CAM_DRIFT = 0.08;
 const int   SHADE_EDGE = 1, CAM_MODE = 0;
-float map(vec3 p){
+float mapScene(vec3 p){
   float bs = 1.0 + 0.05*uPulse*uDBass;     // зал дышит на удар, камера стоит ровно
   p /= bs;
   // Ячейка складки. По вертикали она отдельная: вытянутая даёт высокие
@@ -1041,7 +1107,7 @@ uniform float uDensity, uFill, uContrast, uStretch;
 uniform float uSegments, uSymAngle, uTwist;
 uniform float uDEnergy, uDHigh, uVignette;
 uniform vec3  uBg, uShadow, uMid3, uAccent, uGlow;
-
+${WARP_GLSL}
 const float TAU = 6.28318530718;
 mat2 rot(float a){ float s = sin(a), c = cos(a); return mat2(c, -s, s, c); }
 
@@ -1056,6 +1122,8 @@ void main(){
     a = abs(mod(a + seg*0.5, seg) - seg*0.5);
     uv = vec2(cos(a), sin(a)) * length(uv);
   } else if (uSegments >= 1.0){ uv.x = abs(uv.x); }
+
+  uv += uWarp * 0.05 * warpVec(uv*2.0);         // излом: узор сминается целиком
 
   vec2 st = uv * vec2(uStateRes.y/uStateRes.x, 1.0) + 0.5;
   vec2 tx = 1.0/uStateRes;
@@ -1216,6 +1284,261 @@ void main(){
 
   float r0 = length(uv - 0.5);
   col *= 1.0 - uVignette*smoothstep(0.45, 0.95, r0);
+  outColor = vec4(max(col, 0.0), 1.0);
+}`;
+
+/* ── Эмблема: логотип телом ────────────────────────────────────────────────
+   Логотип приходит полем расстояний по плоскости (строится из контура SVG
+   ниже, в JS) и выдавливается на толщину с фаской. Картинкой на карточке
+   это не сделать: ребром к камере у картинки нет боков, и она пропадает в
+   линию. Тело крутится вокруг своей вертикали и медленно кренится; углы
+   считаются в JS ровным ходом, мимо ускорения времени на громком. */
+const FS_LOGO = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform vec2  uRes;
+uniform float uTime, uBass, uMid, uHigh, uEnergy, uPulse;
+uniform float uShape, uDensity, uFill, uContrast, uStretch;
+uniform float uDBass, uDEnergy, uVignette;
+uniform float uSpin, uTilt, uOrbit, uNetN, uStruct, uFold;
+uniform vec4  uBoltA[4], uBoltB[4];
+uniform vec3  uBg, uShadow, uMid3, uAccent, uGlow;
+uniform sampler2D uLogo;
+${WARP_GLSL}
+mat2 rot(float a){ float s = sin(a), c = cos(a); return mat2(c, -s, s, c); }
+
+// Поле логотипа в его единицах: он вписан в [-1, 1]. За краем текстуры
+// добавляем расстояние до квадрата — оценка остаётся заниженной, и марш
+// не проскакивает.
+float logo2(vec2 q){
+  float d = texture(uLogo, clamp(q*0.5 + 0.5, 0.0, 1.0)).r;
+  return d + length(max(abs(q) - 1.0, 0.0));
+}
+
+// Мир → тело: сперва крен, потом поворот вокруг собственной вертикали.
+vec3 toLogo(vec3 p){
+  p.yz = rot(uTilt) * p.yz;
+  p.xz = rot(uSpin) * p.xz;
+  return p;
+}
+
+// Плоское поле, выдавленное по z. Фаска скругляет и ребро, и контур.
+float body(vec3 p){
+  float th = mix(0.025, 0.20, uDensity);
+  float b  = mix(0.0, 0.022, uStretch);
+  vec2 w = vec2(logo2(p.xy) + b, abs(p.z) - th + b);
+  return min(max(w.x, w.y), 0.0) + length(max(w, 0.0)) - b;
+}
+
+float map(vec3 p){
+  p = toLogo(p);
+  float s = 1.0 + 0.06*uPulse*uDBass;       // удар: эмблема дышит
+  p /= s;
+  float lip = 1.0;
+  if (uWarp > 0.002){
+    // Излом у эмблемы свой. Общий — синусы по объёму — на плоском знаке
+    // читается как оплывший воск: форма мягко плывёт, а удара в этом нет.
+    // Здесь скрут вокруг той же вертикали, вокруг которой эмблема вертится:
+    // верх проворачивается вперёд низа, и это читается как рывок. Сторону
+    // выбирает зерно — от удара к удару она разная.
+    float k = uWarp * 0.55 * (fract(uWarpSeed*0.37) < 0.5 ? -1.0 : 1.0);
+    p.xz = rot(k*p.y) * p.xz;
+    lip = 1.0 + abs(k)*1.05;                 // вытяжка поля скрутом, r ≤ 1.05
+  }
+  return body(p) * s / lip;
+}
+
+// Шаг производной — два текселя поля: с шагом меньше текселя нормаль внутри
+// него постоянна, и на бортах проступают полосы огранки.
+vec3 nrm(vec3 p){
+  const vec2 k = vec2(1.0, -1.0);
+  const float h = 0.004;
+  return normalize(k.xyy*map(p + k.xyy*h) + k.yyx*map(p + k.yyx*h)
+                 + k.yxy*map(p + k.yxy*h) + k.xxx*map(p + k.xxx*h));
+}
+
+/* ── Сфера вокруг эмблемы ────────────────────────────────────────────────
+   Поверхность разбита на ячейки по долготе и широте, в каждой один узел, и
+   он плавает по своей орбитке. Узел связан с соседями, длинные связи тают —
+   сеть всё время перестраивается. По кругу она замкнута: хеш узла берётся
+   по долготе по модулю числа ячеек. Кадр видит широты до ±35°, до полюсов,
+   где ячейки сжимаются, взгляд не доходит. */
+const float RS = 3.3;
+const float TAU = 6.28318530718;
+
+vec2 hash2(vec2 p){
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return fract(sin(p)*43758.5453);
+}
+vec2 node(vec2 id){
+  vec2 h = hash2(vec2(mod(id.x, uNetN), id.y));
+  return id + 0.5 + 0.36*sin(h*TAU + uTime*(0.30 + 0.45*h.yx));
+}
+float seg(vec2 p, vec2 a, vec2 b){
+  vec2 pa = p - a, ba = b - a;
+  return length(pa - ba*clamp(dot(pa, ba)/dot(ba, ba), 0.0, 1.0));
+}
+float link(vec2 q, vec2 a, vec2 b, float w, float px){
+  float fade = smoothstep(1.6, 0.8, length(b - a));      // длинная связь тает
+  return smoothstep(w + px, max(w - px, 0.0), seg(q, a, b)) * fade;
+}
+// (линии, узлы). Связи центрального узла с восемью соседями плюс четыре
+// диагонали через угол ячейки — без них сеть рвётся на стыках.
+vec2 net(vec2 q, float w, float px){
+  vec2 id = floor(q);
+  vec2 P[9];
+  for (int j = 0; j < 3; j++)
+    for (int i = 0; i < 3; i++) P[j*3 + i] = node(id + vec2(float(i - 1), float(j - 1)));
+  float L = 0.0, N = 0.0;
+  for (int k = 0; k < 9; k++){
+    if (k != 4) L = max(L, link(q, P[4], P[k], w, px));
+    N = max(N, smoothstep(w*2.6 + px, w*1.2, length(q - P[k])));
+  }
+  L = max(L, link(q, P[1], P[3], w, px)); L = max(L, link(q, P[1], P[5], w, px));
+  L = max(L, link(q, P[7], P[3], w, px)); L = max(L, link(q, P[7], P[5], w, px));
+  return vec2(L, N);
+}
+
+/* Молнии: на пике из сети вырастают новые связи — ствол от узла к узлу
+   через несколько ячеек и два отростка с обрывом. Ломаная — шум поперёк
+   оси; у ствола концы закреплены на узлах и тянутся за ними, пока те
+   плавают. uBoltA: xy — ячейка начала, zw — сдвиг до ячейки конца;
+   uBoltB: x — зерно, y — возраст, z — сила. */
+float vn(float x){
+  float i = floor(x), f = fract(x);
+  f = f*f*(3.0 - 2.0*f);
+  return mix(fract(sin(i*91.37)*43758.55), fract(sin((i + 1.0)*91.37)*43758.55), f)*2.0 - 1.0;
+}
+float jag(float u, float s){ return 0.62*vn(u*5.0 + s) + 0.28*vn(u*13.0 + s*1.7) + 0.14*vn(u*29.0 + s*2.9); }
+float branch(vec2 d, vec2 ab, float s, float amp, float w, float px, bool pin){
+  float L = length(ab);
+  vec2 dir = ab/L, nr = vec2(-dir.y, dir.x);
+  float u = dot(d, dir)/L, v = dot(d, nr);
+  if (u < -0.05 || u > 1.05 || abs(v) > L*amp*1.1 + w*6.0 + px*4.0) return 0.0;
+  float uc = clamp(u, 0.0, 1.0);
+  float env = pin ? sin(3.14159*uc) : uc*(1.0 - 0.3*uc);
+  float e = abs(v - jag(uc, s)*amp*L*env) + abs(u - uc)*L;
+  float ww = w * (pin ? 1.0 : 1.0 - 0.7*uc);         // отросток к концу тоньше
+  return smoothstep(ww + px, max(ww - px, 0.0), e) + 0.6*exp(-e/(ww*6.0 + px*2.0));
+}
+float bolts(vec2 q, float w, float px){
+  float c = 0.0;
+  for (int i = 0; i < 4; i++){
+    vec4 A = uBoltA[i], B = uBoltB[i];
+    // Вспышка сразу во всю силу и с мерцанием, потом след — новая связь,
+    // которая держится около секунды и растворяется в сети.
+    float flick = 0.75 + 0.25*step(0.5, fract(sin(floor(B.y*40.0) + B.x)*43758.5));
+    float life = B.z * (exp(-B.y/0.14)*flick + 0.45*exp(-B.y/1.0));
+    if (life < 0.01) continue;
+    vec2 a = node(A.xy), b = node(A.xy + A.zw), ab = b - a;
+    vec2 d = q - a; d.x -= uNetN*floor(d.x/uNetN + 0.5);   // через шов долготы
+    float m = branch(d, ab, B.x, 0.16, w, px, true);
+    vec2 dir = normalize(ab), nr = vec2(-dir.y, dir.x);
+    for (int k = 0; k < 2; k++){
+      float sk = B.x + float(k)*13.7;
+      float u0 = 0.25 + 0.45*fract(sk*0.618);
+      vec2 o = ab*u0 + nr*jag(u0, B.x)*0.16*length(ab)*sin(3.14159*u0);
+      float ang = (fract(sk*0.37) < 0.5 ? -1.0 : 1.0)*(0.45 + 0.5*fract(sk*0.73));
+      m = max(m, 0.8*branch(d - o, rot(ang)*ab*(0.35 + 0.25*fract(sk*0.91)), sk, 0.22, w*0.8, px, false));
+    }
+    c += m*life;
+  }
+  return c;
+}
+
+// Слой сферы в точке t луча: сеть плюс молнии. Толщина линий задана в
+// мире, поэтому передняя стенка у камеры выходит крупной и мягкой, задняя —
+// тонкой; линия тоньше пикселя становится тусклее, а не мерцает.
+vec3 shell(vec3 ro, vec3 rd, float t){
+  vec3 sp = ro + rd*t;
+  float inc = max(abs(dot(rd, sp))/RS, 0.3);
+  sp.xz = rot(uOrbit) * sp.xz;
+  float cpu = uNetN/(TAU*RS);                             // ячеек на единицу длины
+  vec2 q = vec2(atan(sp.x, sp.z), asin(clamp(sp.y/RS, -1.0, 1.0))) * (uNetN/TAU);
+  float px = t/(2.5*uRes.y) * cpu / inc;
+  float w = 0.0035*cpu;
+  vec2 n = net(q, w, px);
+  float thin = clamp(1.5*w/px, 0.3, 1.0);
+  float gain = 1.6*uStruct * (1.0 + 0.8*uPulse + 0.5*uEnergy*uDEnergy);
+  vec3 c = uAccent*n.x*thin*gain*0.55 + uGlow*n.y*gain*(0.5 + 0.8*uHigh);
+  if (uFold > 0.001) c += (uGlow*0.8 + uAccent*0.6) * bolts(q, w*2.2, px) * uFold*2.6;
+  return c;
+}
+
+void main(){
+  vec2 uv = (gl_FragCoord.xy - 0.5*uRes) / uRes.y;
+  float r0 = length(uv);
+  // Камера отнесена дальше, а угол сужен так, что эмблема на экране того
+  // же размера: сфере нужен радиус больше кадра, но камера должна остаться
+  // снаружи, и передней стенке — не лезть в объектив.
+  vec3 ro = vec3(0.0, 0.0, -6.0);
+  vec3 rd = normalize(vec3(uv, 2.5));
+
+  vec3 col = mix(uBg, uShadow*0.7, 0.55*smoothstep(1.2, 0.0, r0));
+  float halo = 1e3;
+  bool hit = false;
+  float t = 0.0;
+  // Марш только внутри шара вокруг эмблемы: снаружи пусто, шаги незачем.
+  const float RB = 1.6;
+  float bq = dot(ro, rd), disc = bq*bq - (dot(ro, ro) - RB*RB);
+  if (disc > 0.0){
+    float sq = sqrt(disc);
+    t = max(-bq - sq, 0.0);
+    float tEnd = -bq + sq;
+    for (int i = 0; i < 140; i++){
+      float d = map(ro + rd*t);
+      halo = min(halo, d);
+      if (d < 0.00025*t){ hit = true; break; }
+      t += d*0.9;
+      if (t > tEnd) break;
+    }
+  }
+
+  // Сфера больше кадра, поэтому луч проходит её дважды. Задняя стенка — фон
+  // за эмблемой; вокруг знака она притушена, чтобы сеть с ним не спорила.
+  float sb = dot(ro, rd), sq2 = sqrt(max(sb*sb - (dot(ro, ro) - RS*RS), 0.0));
+  float clr = smoothstep(0.02, 0.5, halo);               // просвет вокруг знака
+  col += shell(ro, rd, -sb + sq2) * mix(0.55, 1.0, clr);
+
+  if (hit){
+    vec3  p   = ro + rd*t;
+    vec3  n   = nrm(p);
+    // Марш встаёт не на поверхность, а в пределах допуска над ней, и на
+    // скользящих бортах по изгибу это заметный сдвиг. Шаг по нормали сажает
+    // точку на поверхность, нормаль берём уже там.
+    p -= n * map(p);
+    n  = nrm(p);
+    // Лицо и борт красим по-разному: иначе ребром эмблема читается пятном.
+    float face = smoothstep(0.55, 0.90, abs(toLogo(n).z));
+    vec3  lig = normalize(vec3(-0.55, 0.65, -0.55));
+    vec3  bak = normalize(vec3(0.40, 0.30, 0.90));   // контровой, из-за эмблемы
+    float dif = clamp(dot(n, lig), 0.0, 1.0);
+    float fr  = pow(1.0 - clamp(dot(n, -rd), 0.0, 1.0), 3.0);
+    // Борт — выдавленный контур, и его нормаль не точнее поля, из которого он
+    // вытянут: узкий блик проявляет на нём остаточную рябь полосами. Лицо
+    // идеально плоское и держит блик любой узости, бортам — широкий, атласный.
+    float shin = mix(16.0, 90.0, uContrast) * mix(0.3, 1.0, face);
+    float spe = pow(clamp(dot(n, normalize(lig - rd)), 0.0, 1.0), shin);
+    float env = smoothstep(-0.3, 0.9, reflect(rd, n).y);
+    vec3 base = mix(uAccent*0.55, uMid3, face);
+    col  = uShadow * 0.25 + base * (0.20 + 0.90*dif);
+    col += mix(uShadow, uGlow, env) * fr * 0.6;
+    col += uGlow   * spe * (0.30 + 1.2*uContrast);
+    col += uAccent * pow(clamp(dot(n, bak), 0.0, 1.0), 3.0) * 0.5;
+    col += uAccent * uPulse * fr * 1.2;
+    col *= 1.0 + 0.8*uEnergy*uDEnergy;
+  }
+
+  // Ореол — ближайший промах луча: светится вокруг силуэта, и дырки в
+  // эмблеме тоже подсвечены изнутри.
+  float hl = exp(-max(halo, 0.0) * mix(30.0, 6.0, uFill));
+  col += uAccent * hl * (0.10 + 0.7*uFill) * (0.5 + 0.9*uPulse + 0.6*uEnergy*uDEnergy)
+       * (hit ? 0.25 : 1.0);
+  // Передняя стенка — у самой камеры, поверх всего. Она бледная и мягкая,
+  // как не в фокусе, а над знаком и вокруг него расступается почти в ноль:
+  // сфера не перекрывает эмблему.
+  col += shell(ro, rd, -sb - sq2) * 0.45 * mix(0.12, 1.0, clr) * (hit ? 0.3 : 1.0);
+  col *= 1.0 - uVignette*smoothstep(0.45, 1.35, r0);
   outColor = vec4(max(col, 0.0), 1.0);
 }`;
 
@@ -1408,11 +1731,15 @@ const SCENES = [
   { id:'signal', name:'сигнал',  fs:FS_SIGNAL,  budget:0.8,
     labels:{ speed:'—', shape:'толщина линий', complexity:'—', density:'—',
              fill:'подложка', contrast:'отклик на громкость', struct:'прибор',
-             stretch:'амплитуда', fold:'—', nearclip:'—' } },
+             stretch:'амплитуда', fold:'—', nearclip:'—', warp:'—' } },
   { id:'oracle', name:'оракул',  fs:FS_ORACLE,  budget:0.55,
     labels:{ shape:'ячейка', complexity:'итерации', density:'толщина',
              fill:'дымка', contrast:'резкость света', fold:'закрутка',
              struct:'структура', stretch:'вытяжка свода' } },
+  { id:'logo',   name:'эмблема', fs:FS_LOGO,    budget:0.8, logo:true,
+    labels:{ speed:'скорость вращения', shape:'крен', complexity:'плотность сети', density:'толщина',
+             fill:'ореол', contrast:'блеск', nearclip:'—', fold:'молнии', struct:'яркость сети',
+             stretch:'фаска', segments:'—', symAngle:'—', twist:'—' } },
 ];
 SCENES.forEach(sc => sc.prog = program(sc.fs));
 const P_FEED   = program(FS_FEED);
@@ -1422,6 +1749,128 @@ const P_COMP   = program(FS_COMP);
 const P_FXAA   = program(FS_FXAA);
 const P_SIM    = program(FS_MORPHO_SIM);
 gl.bindVertexArray(gl.createVertexArray());
+
+/* ── Эмблема: поле расстояний логотипа ────────────────────────────────────
+   Контур заливаем на холст через Path2D — без загрузки картинки, поэтому
+   работает и из file://. По заливке считаем точное евклидово расстояние до
+   края изнутри и снаружи (Фельценшвальб — Хуттенлохер: проход по столбцам,
+   потом по строкам) и кладём в R16F — она фильтруется в WebGL2 без
+   расширений, и линейная выборка даёт гладкий край между пикселями.
+   Строится при первом показе сцены, а не при старте. */
+// 13.svg, основной контур. Два почти прозрачных хвоста трассировки выкинуты.
+const LOGO_PATH = 'M 91.08,376.99 c -0.05,-5.65 -0.39,-11.29 -1.02,-16.91 c -0.59,-5.85 -0.97,-11.71 -1.13,-17.59 c 0.61,-4.85 3.32,-6.89 8.13,-6.14 c 4.83,2.45 14.51,13.78 19.06,17.97 c 1.47,1.17 3.25,-0.52 4.25,-1.5 c 5.88,-6.15 11.75,-12.16 17.99,-17.95 c 0.73,-0.9 0.84,-1.88 0.33,-2.92 c -15.56,-19.03 -25.75,-44.92 -28.81,-69.31 c -0.62,-0.7 -1.4,-1.01 -2.36,-0.94 c -9.67,-0.03 -19.34,0.05 -29,0.23 c -0.53,0.13 -0.96,0.42 -1.3,0.85 c -3.32,5.03 -7.66,8.92 -13.02,11.67 c -12,4.24 -17.56,2.9 -28.49,-0.84 c -1.65,-1.62 -3.41,-3.13 -5.28,-4.54 c -30.72,-29.11 13.69,-76.21 45.45,-41.52 c 2.76,1.51 26.68,0.28 31.64,0.81 c 1.45,0.17 2.34,-0.43 2.69,-1.81 c 3.07,-23.81 13.12,-47.07 27.68,-66.16 c 0.37,-0.57 0.49,-1.19 0.35,-1.86 c -6.62,-6.78 -13.3,-13.52 -20.04,-20.23 c -1.15,-1.48 -2.43,-1.61 -3.84,-0.42 c -5.78,3.85 -20.07,26.43 -27.46,16.76 c -3.32,-4.98 3.89,-43.65 3.81,-52.15 c 1.57,-8.9 6.83,-14.07 15.79,-15.51 c 14.65,-1.12 29.32,-2.09 44,-2.9 c 3.95,-0.58 6.77,0.9 8.47,4.43 c 1.94,6.86 -13.9,17.01 -17.58,22.4 c -1.23,1.38 -1.09,2.64 0.42,3.77 c 6.57,6.45 13.01,13.02 19.32,19.72 c 0.95,0.61 1.9,0.58 2.84,-0.08 c 15.17,-12.68 35.22,-21.12 54.49,-25.55 c 4.68,-0.86 9.34,-1.8 13.97,-2.79 c 0.6,-0.7 0.87,-1.52 0.81,-2.46 c 0.03,-3.78 0.81,-23.7 -0.75,-25.59 c -14.64,-9.41 -19.66,-27.35 -10.77,-42.63 c 26.13,-40.02 82.03,7.82 45.97,39.74 c -1.98,2.52 -0.5,23.89 -0.96,28.48 c -0.13,1.22 0.26,2.21 1.17,2.97 c 22.88,3.11 50.53,14.03 68.05,28.95 c 1.04,0.72 2.04,0.68 3,-0.12 c 6.42,-6.55 12.88,-13.05 19.38,-19.5 c 1.3,-1.01 1.64,-2.24 1.02,-3.7 c -6.2,-6.17 -13.37,-12.26 -18.6,-19.18 c -3.62,-6.21 1.52,-10.77 7.75,-9.86 c 17.22,2.33 34.72,3.11 51.75,6.35 c 5.83,3.78 9.07,9.13 9.71,16.06 c 1.02,14.33 1.93,28.67 2.73,43.01 c 0.42,4.36 -1.47,7.05 -5.68,8.05 c -5.43,0.86 -16.6,-14.45 -21.11,-17.75 c -0.67,-0.59 -1.44,-0.84 -2.32,-0.74 c -7.18,6.83 -14.31,13.74 -21.38,20.71 c -0.64,1.14 -0.65,2.28 -0.02,3.42 c 1.74,2.31 3.42,4.66 5.06,7.05 c 1.24,2.66 2.7,5.19 4.41,7.59 c 6.9,13.35 12.25,26.9 15.29,41.68 c 0.7,4 1.37,7.99 2.02,11.99 c 0.69,0.68 1.53,1 2.52,0.95 c 9.02,0.07 18.05,0 27.06,-0.2 c 1.84,-0.38 3.39,-3.39 4.57,-4.69 c 14.22,-15.27 37.9,-12.98 49.13,4.52 c 19.17,33.23 -24.95,65.5 -51.2,34.48 c -2.22,-1.49 -27.08,-0.63 -31.52,-0.57 c -0.53,0.07 -0.94,0.33 -1.23,0.77 c -1.14,6.66 -2.66,13.24 -4.55,19.73 c -0.59,2.48 0.47,2.32 -1.41,4.26 c -4.95,16.16 -14.82,33.47 -25.69,46.26 c -0.24,0.42 -0.31,0.86 -0.22,1.34 c 6.45,6.72 13,13.35 19.65,19.91 c 0.67,0.65 1.44,1.11 2.32,1.38 c 6.25,-6.03 12.55,-12.02 18.88,-17.99 c 3.34,-1.58 6.11,-0.91 8.32,2.04 c 1.86,6.48 -0.66,49.38 -4.05,57.6 c -1.68,1.87 -3.52,3.57 -5.51,5.11 c -8.94,4.98 -37.15,5.14 -48.56,7.34 c -6.73,1.48 -16.99,0.66 -13.12,-8.99 c 5.39,-6.9 12.56,-12.85 18.6,-19.26 c 0.95,-1 0.97,-2 0.06,-3.03 c -5.99,-6.01 -11.97,-12.02 -17.95,-18.03 c -1.67,-1.31 -2.41,-4.58 -5.1,-3.07 c -19.81,13.76 -39.58,21.41 -63.47,24.61 c -2.02,0.28 -2.82,1.46 -2.41,3.52 c 0.5,3.55 -0.98,25.76 0.97,27.01 c 14.73,9.2 19.6,25.45 12.22,41.33 c -26,42.05 -82.27,-4.9 -47.67,-37.68 c 1.91,-3.13 0.58,-27.87 0.8,-33.23 c -0.1,-0.44 -0.35,-0.78 -0.74,-1.01 c -6.27,-1.25 -12.5,-2.68 -18.69,-4.31 c -15.61,-4.47 -33.47,-12.71 -46.02,-22.87 c -0.65,-0.38 -1.35,-0.48 -2.08,-0.3 c -7.08,6.93 -14.03,13.98 -20.85,21.14 c -0.12,0.9 0.14,1.68 0.77,2.33 c 5.69,6.43 14.49,12.86 18.76,20.08 c 1.94,5.73 -2.45,9.12 -7.86,8.61 c -15.32,-1.73 -30.66,-3.39 -46,-4.98 c -14.87,-2.28 -16.8,-14.73 -16.61,-27.62 Z M 126.07,221 c 1.14,10.35 -0.69,15.97 9.76,20.89 c 17.24,13.01 51.08,12.48 72.21,18.5 c 9.2,2.65 25.23,9.74 28.45,19.59 c 2.41,7.35 0.93,36.33 8.31,39.34 c 9.1,4.35 13.17,2.19 14.41,-7.81 c 2.03,-31.47 -6.13,-67.56 19.98,-91.72 c 10.26,-5.21 15.88,-7.16 22.86,-17.01 c 6.19,-12.8 0.6,-29.03 -12.17,-35.17 c -7.2,-2.71 -13.01,5.2 -19.32,7.47 c -25.96,19.67 -45.71,7.77 -63.22,-14.95 c -9.17,-8.76 -33.77,-7.64 -44.4,-1.76 c -20.11,10.72 -30.56,34.69 -36.22,55.95 c -0.55,2.2 -0.76,4.42 -0.65,6.68 Z M 275.98,264 c 0.08,4.1 0.92,8.04 2.54,11.81 c 16.57,34.08 64.76,17.17 58.34,-18.29 c -7.68,-35.55 -60.07,-31.73 -60.88,6.48 Z M 287.43,265 c 2.07,-24.72 35.18,-26.45 37.3,-1.5 c 0.26,24.54 -34.65,28.78 -37.3,1.5 Z M 123.21,255 c 2.61,34.15 17.4,63.02 42.51,85.83 c 16.32,13.46 34.97,23.44 55.76,28.27 c 19.17,5.33 30.2,-14.93 36.24,-29.77 c 0.28,-1.08 0.99,-2.41 -0.41,-2.97 c -11.85,1.8 -27.31,-5.19 -30.72,-17.39 c -1.13,-4.72 -1.76,-9.5 -1.89,-14.35 c -0.14,-1.3 -0.86,-1.84 -2.16,-1.63 c -25.82,9.44 -56.66,-11.73 -73.79,-29.27 c -2.38,-3.9 -4.81,-7.77 -7.28,-11.62 c -5.28,-2.35 -11.43,-6.97 -16.18,-8.82 c -1.57,-0.57 -2.26,0 -2.08,1.72 Z M 166.13,269.2 c 0.06,0.86 0.46,1.52 1.19,1.98 c 10.76,9.19 41.6,27.73 54.41,15.03 c 1.42,-4.3 -12.44,-9.95 -15.71,-10.77 c -5.75,-2.29 -35.81,-6.98 -39.89,-6.24 Z';
+const LOGO_VIEW = 499, LOGO_RES = 1024, LOGO_PAD = 0.04;
+const logoTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, logoTex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, 1, 1, 0, gl.RED, gl.FLOAT, new Float32Array([1]));  // пока пусто
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+let logoReady = false, logoSpin = 0, logoTiltPh = 0, logoOrbit = 0;
+
+// Сфера вокруг эмблемы: ячеек по кругу, от «сложности».
+const netCells = () => Math.round(20 + 40*CFG.complexity);
+
+/* Молнии по сфере. Выпускаются в том же кадре, что и излом на пике: слот
+   берётся самый старый, место — там, где сфера сейчас видна: чаще задняя
+   стенка напротив камеры, реже передняя — по краям кадра, не над знаком. */
+const BOLTS = 4;
+const boltA = new Float32Array(BOLTS*4), boltB = new Float32Array(BOLTS*4);
+for (let i = 0; i < BOLTS; i++) boltB[i*4 + 1] = 99;          // давно погасли
+function spawnBolts(g){
+  const N = netCells(), TAU = Math.PI*2;
+  const n = 1 + Math.round(2*Math.min(1, g));
+  for (let k = 0; k < n; k++){
+    let s = 0;
+    for (let i = 1; i < BOLTS; i++) if (boltB[i*4 + 1] > boltB[s*4 + 1]) s = i;
+    const front = Math.random() < 0.3;
+    const lonW = front ? Math.PI + (Math.random() < 0.5 ? -1 : 1)*(0.18 + 0.2*Math.random())
+                       : (Math.random()*2 - 1)*1.0;
+    const lat = (Math.random()*2 - 1)*(front ? 0.25 : 0.4);
+    const ang = Math.random()*TAU, len = 2 + Math.floor(Math.random()*3);
+    let dx = Math.round(Math.cos(ang)*len), dy = Math.round(Math.sin(ang)*len*0.7);
+    if (!dx && !dy) dx = len;
+    boltA.set([Math.floor((lonW + logoOrbit)/TAU*N), Math.floor(lat/TAU*N), dx, dy], s*4);
+    boltB.set([Math.random()*100, 0, 0.6 + 0.4*Math.min(1, g), 0], s*4);
+  }
+}
+
+// Квадраты расстояний вдоль одной линии: нижняя огибающая парабол.
+function edt1(f, off, stride, n, v, z, d){
+  let k = 0; v[0] = 0; z[0] = -Infinity; z[1] = Infinity;
+  for (let q = 1; q < n; q++){
+    const fq = f[off + q*stride] + q*q;
+    let s = (fq - (f[off + v[k]*stride] + v[k]*v[k])) / (2*(q - v[k]));
+    while (s <= z[k]){ k--; s = (fq - (f[off + v[k]*stride] + v[k]*v[k])) / (2*(q - v[k])); }
+    k++; v[k] = q; z[k] = s; z[k+1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++){
+    while (z[k+1] < q) k++;
+    const r = q - v[k];
+    d[q] = r*r + f[off + v[k]*stride];
+  }
+  for (let q = 0; q < n; q++) f[off + q*stride] = d[q];
+}
+function edt2(f, n){
+  const v = new Int32Array(n), z = new Float64Array(n + 1), d = new Float64Array(n);
+  for (let x = 0; x < n; x++) edt1(f, x, n, n, v, z, d);      // столбцы
+  for (let y = 0; y < n; y++) edt1(f, y*n, 1, n, v, z, d);    // строки
+}
+
+function buildLogoSDF(){
+  const N = LOGO_RES;
+  const c = document.createElement('canvas'); c.width = c.height = N;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  const k = N*(1 - 2*LOGO_PAD)/LOGO_VIEW;
+  x.setTransform(k, 0, 0, k, N*LOGO_PAD, N*LOGO_PAD);
+  const path = new Path2D(LOGO_PATH);
+  x.fillStyle = x.strokeStyle = '#fff'; x.lineWidth = 0.5;
+  x.fill(path, 'evenodd'); x.stroke(path);
+  const px = x.getImageData(0, 0, N, N).data;
+  // Край берём из сглаживания холста, а не порогом: у пороговой маски
+  // граница идёт лесенкой по пикселям, и выдавленные борта покрываются
+  // рёбрышками вдоль толщины. Полупокрытый пиксель знает, где внутри него
+  // проходит край, — отсюда начальные расстояния, как в TinySDF.
+  const fin = new Float64Array(N*N), fout = new Float64Array(N*N);
+  for (let i = 0; i < N*N; i++){
+    const a = px[i*4 + 3]/255;
+    if (a <= 0){ fin[i] = 1e20; fout[i] = 0; }
+    else if (a >= 1){ fin[i] = 0; fout[i] = 1e20; }
+    else { const e = 0.5 - a; fin[i] = e > 0 ? e*e : 0; fout[i] = e < 0 ? e*e : 0; }
+  }
+  edt2(fin, N); edt2(fout, N);
+  // Пиксель в единицах логотипа: текстура [0,1] ложится на [-1,1]. Строки
+  // переворачиваем — у холста ноль сверху, у текстуры снизу.
+  const u = 2/N, sdf = new Float32Array(N*N);
+  for (let y = 0; y < N; y++) for (let xx = 0; xx < N; xx++){
+    const i = y*N + xx;
+    sdf[(N - 1 - y)*N + xx] = (Math.sqrt(fin[i]) - Math.sqrt(fout[i]))*u;
+  }
+  // Двенадцать проходов биномиального 3×3, σ ≈ 2.5 пикселя. Покрытие у
+  // сглаживания холста квантованное, и на почти горизонтальных и
+  // вертикальных участках контура край остаётся пологой лесенкой в
+  // несколько пикселей шагом. На виде нормалей её не видно, а узкий блик
+  // раздувает её в полосы поперёк бортов; пиксель-другой сглаживания и
+  // растр вдвое крупнее их не брали, двенадцать проходов берут. Линейное
+  // поле сглаживание не трогает — нулевая линия на месте, скругляются только
+  // углы, на ~0.005 размера эмблемы.
+  const tmp = new Float32Array(N*N);
+  for (let pass = 0; pass < 12; pass++){
+    for (let y = 0; y < N; y++) for (let xx = 0; xx < N; xx++){
+      const i = y*N + xx;
+      tmp[i] = 0.5*sdf[i] + 0.25*(sdf[xx > 0 ? i - 1 : i] + sdf[xx < N - 1 ? i + 1 : i]);
+    }
+    for (let y = 0; y < N; y++) for (let xx = 0; xx < N; xx++){
+      const i = y*N + xx;
+      sdf[i] = 0.5*tmp[i] + 0.25*(tmp[y > 0 ? i - N : i] + tmp[y < N - 1 ? i + N : i]);
+    }
+  }
+  gl.bindTexture(gl.TEXTURE_2D, logoTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, N, N, 0, gl.RED, gl.FLOAT, sdf);
+  logoReady = true;
+}
 
 function makeFBO(w, h, wrap){
   const t = gl.createTexture();
@@ -1570,7 +2019,7 @@ let ac=null, analyser=null, srcNode=null, audioBuf=null, dbBuf=null, outGain=nul
 const now = () => performance.now()/1000;
 let startedAt=0, offset=0, playing=false;
 
-const F = { bass:0, mid:0, high:0, energy:0, pulse:0 };
+const F = { bass:0, mid:0, high:0, energy:0, pulse:0, warp:0 };
 let lastKick=-1, kickCount=0;
 // Приём, подсмотренный у photism: удар не «дёргает» параметр складки, а
 // задаёт ему новую случайную цель, к которой тот плавно едет. Поэтому каждый
@@ -1698,6 +2147,39 @@ function fire(now, strength){
   seedLife = (0.15 + 0.65*Math.min(1, s)) * Math.min(1, 0.35 + s);
 }
 
+/* Излом геометрии на верхушке динамики. Признак спит почти всё время и
+   просыпается только на самых сильных ударах и самых громких местах трека.
+   Вклад удара мгновенный и быстро гаснет. Вклад громкого места держится,
+   пока держится громкость, но заметно тише: иначе на дропе картинка стоит
+   изломанной целиком, и излом перестаёт быть событием. */
+let warpImp = 0, warpDyn = 0, warpLoud = 0, warpSeed = 0;
+
+// g — насколько удар в верхушке, 0..1. Считается снаружи: у разбора трека
+// для этого есть весь трек, у живого входа — только скользящее окно.
+function warpKick(g){
+  if (!(g > 0)) return;
+  if (F.warp < 0.05) warpSeed = Math.random()*64;   // новый рисунок — только на погасшем
+  const s = Math.min(1, g);
+  // Верхний удар даёт 0.8, на громком месте — единицу.
+  warpImp = Math.max(warpImp, s*s*(3 - 2*s) * (0.8 + 0.2*warpDyn));
+}
+
+/* e — энергия до огибающей, span — её диапазон [пол, 96-й перцентиль].
+   Громкость берётся медленная, в четверть секунды. По мгновенной энергии
+   верхушку трека задевает каждая доля плотного дропа, и излом висит на нём
+   целиком; медленная доходит до верха только там, где громко по-настоящему. */
+function warpStep(dt, e, span){
+  const n = (e - span[0]) / Math.max(span[1] - span[0], 1e-4);
+  warpLoud = envelope(warpLoud, n, dt, 0.25, 0.5);
+  const g = Math.max(0, Math.min(1, (warpLoud - 0.90)/0.20));
+  warpDyn = envelope(warpDyn, g*g*(3 - 2*g), dt, 0.04, 0.45);
+  warpImp *= Math.exp(-dt/0.30);
+  // Вверх — сразу, в том же кадре: любая атака здесь читается как опоздание.
+  const wt = Math.max(warpImp, 0.4*warpDyn);
+  if (wt > F.warp + 0.2) spawnBolts(wt);                // пик: молнии по сфере эмблемы
+  F.warp = wt > F.warp ? wt : envelope(F.warp, wt, dt, 0.02, 0.05);
+}
+
 function detectKick(dt, now){
   if (!anaOn) return;
   anaOn.getFloatFrequencyData(onsetMag);
@@ -1763,7 +2245,7 @@ let kickCursor = 0, lastPos = 0;
 // Воспроизведение по готовому разбору: полосы читаются по индексу кадра,
 // удары — по списку времён. Никакого живого БПФ здесь уже нет.
 function analyzeFromTrack(dt){
-  const pos = position();
+  const pos = heardPosition();
   const idx = Math.max(0, Math.min(TRACK.frames - 1, Math.floor(pos*TRACK.sr/TRACK.hop)));
   const base = idx*SPEC_BINS;
   for (let k = 0; k < SPEC_BINS; k++){
@@ -1782,9 +2264,9 @@ function analyzeFromTrack(dt){
   const hn = shape(rh, D.high, L.gM) * L.mel;
   const en = shape(rb*0.5 + rm*0.35 + rh*0.15, D.energy, L.gE);
   F.bass   = envelope(F.bass,   bn, dt, CFG.attack, CFG.release);
-  F.mid    = envelope(F.mid,    mn, dt, CFG.attack*4, CFG.release*1.7);
-  F.high   = envelope(F.high,   hn, dt, CFG.attack*2.5, CFG.release*1.2);
-  F.energy = envelope(F.energy, en, dt, CFG.attack*7, CFG.release*2.8);
+  F.mid    = envelope(F.mid,    mn, dt, CFG.attack*2.5, CFG.release*1.7);
+  F.high   = envelope(F.high,   hn, dt, CFG.attack*1.5, CFG.release*1.2);
+  F.energy = envelope(F.energy, en, dt, CFG.attack*3.5, CFG.release*2.8);
 
   // Перемотка не должна выстреливать пачкой пропущенных ударов.
   if (Math.abs(pos - lastPos) > 0.5){
@@ -1793,14 +2275,15 @@ function analyzeFromTrack(dt){
   } else {
     while (kickCursor < TRACK.kicks.length && TRACK.kicks[kickCursor].t <= pos){
       const k = TRACK.kicks[kickCursor++];
-      if (pos - k.t < 0.25) fire(0, kickWeight(k.s, L.gK));
+      if (pos - k.t < 0.25){ fire(0, kickWeight(k.s, L.gK)); warpKick(k.w); }
     }
   }
   if (pos < lastPos - 0.5) kickCursor = 0;          // луп начал трек заново
   lastPos = pos;
+  warpStep(dt, rb*0.5 + rm*0.35 + rh*0.15, D.energy);
 
   F.pulse *= Math.exp(-dt/CFG.pulseDec);
-  morph += (morphTarget - morph) * (1 - Math.exp(-dt/0.6));
+  morph += (morphTarget - morph) * (1 - Math.exp(-dt/0.35));
   dtGramLast = dt;
   readWave(pos);
 }
@@ -1826,8 +2309,9 @@ function analyze(dt, now){
   if (!(audioBuf && playing)){
     // Сигнала нет — признаки просто гаснут, поле продолжает течь само.
     for (const k of ['bass','mid','high','energy']) F[k] += (0 - F[k])*(1 - Math.exp(-dt/0.5));
+    warpStep(dt, 0, SPAN_LIVE.energy);
     F.pulse *= Math.exp(-dt/CFG.pulseDec);
-    morph += (morphTarget - morph) * (1 - Math.exp(-dt/0.6));
+    morph += (morphTarget - morph) * (1 - Math.exp(-dt/0.35));
     updateSpectrum(dt, false);
     updateScopes(false, dt);
     return;
@@ -1844,13 +2328,14 @@ function analyze(dt, now){
   const hn = shape(rh, SPAN_LIVE.high, L.gM) * L.mel;
   const en = shape(rb*0.5 + rm*0.35 + rh*0.15, SPAN_LIVE.energy, L.gE);
   F.bass   = envelope(F.bass,   bn, dt, CFG.attack, CFG.release);
-  F.mid    = envelope(F.mid,    mn, dt, CFG.attack*4, CFG.release*1.7);
-  F.high   = envelope(F.high,   hn, dt, CFG.attack*2.5, CFG.release*1.2);
-  F.energy = envelope(F.energy, en, dt, CFG.attack*7, CFG.release*2.8);
+  F.mid    = envelope(F.mid,    mn, dt, CFG.attack*2.5, CFG.release*1.7);
+  F.high   = envelope(F.high,   hn, dt, CFG.attack*1.5, CFG.release*1.2);
+  F.energy = envelope(F.energy, en, dt, CFG.attack*3.5, CFG.release*2.8);
 
   detectKick(dt, now);
+  warpStep(dt, rb*0.5 + rm*0.35 + rh*0.15, SPAN_LIVE.energy);
   F.pulse *= Math.exp(-dt/CFG.pulseDec);
-  morph += (morphTarget - morph) * (1 - Math.exp(-dt/0.6));
+  morph += (morphTarget - morph) * (1 - Math.exp(-dt/0.35));
 }
 
 /* ------------------------------------------------------ Проигрыватель ---- */
@@ -2080,6 +2565,17 @@ async function analyzeTrack(buf, onProgress){
     for (const k of kicks) k.s = Math.min(1.6, k.s/ref);
   }
 
+  /* Кандидаты в излом — удары, которые выделяются и относительно соседей
+     (превышение порога), и в абсолюте (величина всплеска по всему треку).
+     По одному признаку не выходит: превышение ловит одинокий щелчок в тишине,
+     абсолют — любой удар плотного дропа. Порог — перцентиль самого трека. */
+  if (kicks.length){
+    const lv = kicks.map(k => Math.sqrt(k.s * flux[k.n]*scale));
+    const q = lv.slice().sort((a,b)=>a-b);
+    const lo = q[Math.floor(q.length*0.88)], hi = q[Math.floor(q.length*0.985)];
+    kicks.forEach((k, i) => k.w = hi > lo ? Math.min(1, Math.max(0, (lv[i] - lo)/(hi - lo))) : 0);
+  }
+
   /* Сетка долей. Вживую у меня это не получилось: шестисекундного окна мало,
      темп садился на октаву ниже, а фаза уплывала. Здесь виден весь трек
      сразу, и обе задачи решаются перебором без всяких приближений. */
@@ -2170,7 +2666,7 @@ const LIVE = {
   dyn: null, scale: 1, calAt: -1e9, cal: 0,
   norm: new Float32Array(SPEC_BINS).fill(1e-4),
   sal: [], salRef: 1e-6,
-  lastKickFrame: -1e9, bpmHits: [], bpm: 0,
+  lastKickFrame: -1e9, kickSal: 0, bpmHits: [], bpm: 0,
 };
 
 // Воркл_ет собирается из строки: файл должен остаться одним файлом.
@@ -2297,22 +2793,35 @@ function liveCalibrate(){
 
 // Пик потока в кадре n. Окно назад полное, вперёд — сколько позволяет
 // упреждение: в этом и весь размен между точностью и задержкой.
-function livePeak(n, wf){
-  const WB = 24, GAP = Math.max(4, Math.round(0.10*ac.sampleRate/HOP));
-  if (n - LIVE.lastKickFrame < GAP) return 0;
-  const at = i => LIVE.flux[(i % LIVE_RING + LIVE_RING) % LIVE_RING]*LIVE.scale;
-  const lo = Math.max(LIVE.head - LIVE.seen, n - WB), hi = n + wf;
+const liveFlux = i => LIVE.flux[(i % LIVE_RING + LIVE_RING) % LIVE_RING]*LIVE.scale;
+function liveThr(n, wf){
+  const lo = Math.max(LIVE.head - LIVE.seen, n - 24), hi = n + wf;
   let mean = 0, cnt = 0;
-  for (let i = lo; i <= hi; i++){ mean += at(i); cnt++; }
-  if (!cnt) return 0;
+  for (let i = lo; i <= hi; i++){ mean += liveFlux(i); cnt++; }
+  if (!cnt) return Infinity;
   mean /= cnt;
   let dev = 0;
-  for (let i = lo; i <= hi; i++) dev += Math.abs(at(i) - mean);
-  dev /= cnt;
-  const v = at(n), thr = mean + dev*1.6 + 0.012;
-  if (!(v > thr && v >= at(n-1) && (wf < 1 || v > at(n+1)))) return 0;
+  for (let i = lo; i <= hi; i++) dev += Math.abs(liveFlux(i) - mean);
+  return mean + dev/cnt*1.6 + 0.012;
+}
+function livePeak(n, wf){
+  const GAP = Math.max(4, Math.round(0.10*ac.sampleRate/HOP));
+  if (n - LIVE.lastKickFrame < GAP) return 0;
+  const v = liveFlux(n), thr = liveThr(n, wf);
+  if (!(v > thr && v >= liveFlux(n-1) && (wf < 1 || v > liveFlux(n+1)))) return 0;
   LIVE.lastKickFrame = n;
   return v - thr;
+}
+
+/* Без упреждения удар выпускается на первом кадре над порогом. Но у кика
+   всплеск обычно размазан на два окна: первое накрывает атаку наполовину,
+   и сила по нему занижена. Ждать второе — это кадр задержки, поэтому силу
+   догоняем: если кадр сразу после срабатывания выше, разницу добавляем к
+   уже выпущенному удару. Реакция в первый же кадр, сила — как с ожиданием. */
+function liveRise(n){
+  const k = n - LIVE.lastKickFrame;
+  if (k < 1 || k > 2 || liveFlux(n) <= liveFlux(n-1)) return 0;
+  return liveFlux(n) - liveThr(n, 0);
 }
 
 /* ── Откуда берётся звук ───────────────────────────────────────────────────
@@ -2509,6 +3018,17 @@ function disposeSource(L){
 
 /* nf-live:end */
 
+// Модуль воркл_ета. Blob — обычный путь, но у страницы, открытой как file://,
+// origin непрозрачный, и Chrome отказывает blob-модулю: «Unable to load a
+// worklet's module». data: URL грузится при любом origin — он и запасной.
+async function loadWorklet(ac){
+  const blob = URL.createObjectURL(new Blob([LIVE_WORKLET], { type: 'text/javascript' }));
+  try { await ac.audioWorklet.addModule(blob); return; }
+  catch(e){ if (location.protocol !== 'file:') console.warn('воркл_ет из blob не загрузился:', e); }
+  finally { URL.revokeObjectURL(blob); }
+  await ac.audioWorklet.addModule('data:text/javascript;charset=utf-8,' + encodeURIComponent(LIVE_WORKLET));
+}
+
 // Общий вход для всех дорог: поток уже добыт, дальше он всем один.
 async function useSource(src){
   ac = ac || new (window.AudioContext || window.webkitAudioContext)();
@@ -2517,13 +3037,11 @@ async function useSource(src){
   stopPlayback(); TRACK = null; audioBuf = null;
   buildGraph();
   if (!LIVE.mod){
-    const url = URL.createObjectURL(new Blob([LIVE_WORKLET], { type: 'text/javascript' }));
-    await ac.audioWorklet.addModule(url);
-    URL.revokeObjectURL(url);
+    await loadWorklet(ac);
     LIVE.mod = true;                       // модуль регистрируется один раз на контекст
   }
   LIVE.head = 0; LIVE.seen = 0; LIVE.read = -1; LIVE.dyn = null; LIVE.cal = 0;
-  LIVE.sal.length = 0; LIVE.salRef = 1e-6; LIVE.lastKickFrame = -1e9; LIVE.bpmHits.length = 0;
+  LIVE.sal.length = 0; LIVE.salRef = 1e-6; LIVE.lastKickFrame = -1e9; LIVE.kickSal = 0; LIVE.bpmHits.length = 0;
   LIVE.norm.fill(1e-4);
   LIVE.frames = 0; LIVE.level = 0; LIVE.peak = 0; LIVE.loudAt = 0; LIVE.kicks = 0;
   LIVE.startedAt = performance.now();
@@ -2621,7 +3139,7 @@ function showSourceError(e){
 function analyzeFromLive(dt){
   const LOOKF = Math.max(0, Math.round(CFG.lookAhead/1000*ac.sampleRate/HOP));
   const target = LIVE.head - 1 - LOOKF;
-  if (target < 0){ F.pulse *= Math.exp(-dt/CFG.pulseDec); return; }
+  if (target < 0){ F.pulse *= Math.exp(-dt/CFG.pulseDec); warpStep(dt, 0, SPAN_LIVE.energy); return; }
 
   if (now() - LIVE.calAt > 0.5){ LIVE.calAt = now(); liveCalibrate(); }
 
@@ -2638,7 +3156,11 @@ function analyzeFromLive(dt){
       if (LIVE.sal.length > 96) LIVE.sal.shift();
       const q = LIVE.sal.slice().sort((a,b)=>a-b);
       LIVE.salRef = Math.max(q[Math.floor(q.length*0.90)], 1e-6);
-      fire(0, kickWeight(Math.min(1.6, sal/LIVE.salRef), L.gK));
+      const r = Math.min(1.6, sal/LIVE.salRef);
+      fire(0, kickWeight(r, L.gK));
+      // Вживую верхушка — выше 90-го перцентиля недавних ударов.
+      warpKick((r - 1.0)/0.45);
+      LIVE.kickSal = sal;
       LIVE.kicks++;
       const t = n*HOP/ac.sampleRate;
       LIVE.bpmHits.push(t);
@@ -2654,6 +3176,15 @@ function analyzeFromLive(dt){
           while (60/per < 70)  per *= 0.5;
           LIVE.bpm = Math.round(60/per);
         }
+      }
+    } else if (LOOKF === 0){
+      const up = liveRise(n);
+      if (up > LIVE.kickSal){
+        const r0 = Math.min(1.6, LIVE.kickSal/LIVE.salRef), r = Math.min(1.6, up/LIVE.salRef);
+        F.pulse = Math.min(1.6, F.pulse + kickWeight(r, L.gK) - kickWeight(r0, L.gK));
+        warpKick((r - 1.0)/0.45);
+        LIVE.sal[LIVE.sal.length - 1] = up;
+        LIVE.kickSal = up;
       }
     }
   }
@@ -2674,12 +3205,13 @@ function analyzeFromLive(dt){
   const hn = shape(rh, D.high, L.gM) * L.mel;
   const en = shape(rb*0.5 + rm*0.35 + rh*0.15, D.energy, L.gE);
   F.bass   = envelope(F.bass,   bn, dt, CFG.attack, CFG.release);
-  F.mid    = envelope(F.mid,    mn, dt, CFG.attack*4, CFG.release*1.7);
-  F.high   = envelope(F.high,   hn, dt, CFG.attack*2.5, CFG.release*1.2);
-  F.energy = envelope(F.energy, en, dt, CFG.attack*7, CFG.release*2.8);
+  F.mid    = envelope(F.mid,    mn, dt, CFG.attack*2.5, CFG.release*1.7);
+  F.high   = envelope(F.high,   hn, dt, CFG.attack*1.5, CFG.release*1.2);
+  F.energy = envelope(F.energy, en, dt, CFG.attack*3.5, CFG.release*2.8);
 
   F.pulse *= Math.exp(-dt/CFG.pulseDec);
-  morph += (morphTarget - morph) * (1 - Math.exp(-dt/0.6));
+  morph += (morphTarget - morph) * (1 - Math.exp(-dt/0.35));
+  warpStep(dt, rb*0.5 + rm*0.35 + rh*0.15, D.energy);
   updateScopes(true, dt);
 }
 
@@ -2716,6 +3248,17 @@ function position(){
   if (!audioBuf) return 0;
   const t = playing ? (ac.currentTime - startedAt) : offset;
   return ((t % audioBuf.duration) + audioBuf.duration) % audioBuf.duration;
+}
+
+/* Где звук на самом деле. ac.currentTime — то, что аудиопоток уже отдал
+   системе, а слышно это позже на задержку вывода: на обычных динамиках
+   десятки миллисекунд, на блютусе пара сотен. Кадру же до экрана ещё
+   примерно кадр, поэтому показываем звук, который прозвучит к показу. */
+function heardPosition(){
+  const p = position();
+  if (!playing || !ac) return p;
+  const lat = (ac.outputLatency || 0) + (ac.baseLatency || 0) - 1/Math.max(fps, 30);
+  return ((p - lat) % audioBuf.duration + audioBuf.duration) % audioBuf.duration;
 }
 function seekTo(sec){
   if (!audioBuf) return;
@@ -2846,6 +3389,236 @@ let colorInputs = [], paletteSelect = null, presetSelect = null, deleteBtn = nul
 
 function fmt(v, step){ return step >= 1 ? String(v|0) : (Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1)); }
 
+/* ── MIDI: управление с контроллера ────────────────────────────────────────
+   Орган контроллера и параметр связаны через банк: орган узнаётся по
+   сообщению («cc:74», «pb»), банк хранит, какой параметр за ним. Сейчас банк
+   один; банки по разделам и их переключение с контроллера — следующий шаг,
+   и для него здесь уже всё разложено: органы отдельно, привязки отдельно.
+
+   Ручки абсолютные. После пресета, сброса или ползунка мышью ручка стоит не
+   там, где параметр, и без подхвата параметр прыгнул бы. Поэтому ручка
+   берёт параметр, только пройдя через его значение, а пока не взяла, у
+   ползунка стрелка — куда крутить. Значение ставится сразу, без
+   сглаживания: любая огибающая здесь — задержка. */
+
+// ATEMP MC1 из коробки: пять ручек, колесо модуляции и питч; подписи — как на
+// корпусе. Ручки переназначаются в меню самого MC1 на любой CC, поэтому органы
+// узнаются по сообщению, и незнакомый CC после обучения — тоже орган.
+const MIDI_DEVICE = /atemp|mc1/i;
+const MC1_CTLS  = { 'cc:73':'Atk', 'cc:74':'Cut', 'cc:72':'Rel', 'cc:75':'Dec',
+                    'cc:7':'Vol', 'cc:1':'Mod', 'pb':'PB' };
+const MC1_BINDS = { 'cc:73':'speed', 'cc:74':'shape', 'cc:72':'complexity', 'cc:75':'density',
+                    'cc:7':'exposure', 'cc:1':'persist', 'pb':'hue' };
+const SPEC_ITEM = {};
+for (const g of SPEC) for (const it of g.items) if (Array.isArray(it)) SPEC_ITEM[it[0]] = it;
+
+const LS_MIDI = 'noisefield.midi';
+const MIDI = {
+  access: null, input: null, wantId: null, status: 'подключаю…', ok: false,
+  bank: 0, banks: [{ name: 'основной', binds: { ...MC1_BINDS } }],
+  pickup: true, learn: false, learnKey: null,
+  setBy: {}, lastX: {}, wait: {},     // что поставили мы; где была ручка; куда крутить до подхвата
+  last: '', program: 0, ui: null, selSig: '',
+};
+const midiName  = key => MC1_CTLS[key] || (key === 'pb' ? 'PB' : 'CC' + key.slice(3));
+const midiBinds = () => MIDI.banks[MIDI.bank].binds;
+
+function midiSave(){
+  try{ localStorage.setItem(LS_MIDI, JSON.stringify({ banks: MIDI.banks, bank: MIDI.bank,
+                                                     pickup: MIDI.pickup, wantId: MIDI.wantId })); }catch(e){}
+}
+function midiLoad(){
+  try{
+    const s = JSON.parse(localStorage.getItem(LS_MIDI) || 'null');
+    if (!s || !Array.isArray(s.banks) || !s.banks.length) return;
+    // Привязка к параметру, которого больше нет, просто выпадает.
+    MIDI.banks = s.banks.map(b => ({ name: String(b.name || 'банк'),
+      binds: Object.fromEntries(Object.entries(b.binds || {}).filter(([, k]) => SPEC_ITEM[k])) }));
+    MIDI.bank = Math.min(Math.max(0, s.bank|0), MIDI.banks.length - 1);
+    MIDI.pickup = s.pickup !== false;
+    MIDI.wantId = s.wantId || null;
+  }catch(e){}
+}
+
+async function midiConnect(){
+  if (!navigator.requestMIDIAccess){ MIDI.status = 'браузер не поддерживает Web MIDI'; return midiShow(); }
+  MIDI.status = 'жду разрешения на MIDI…'; midiShow();
+  try {
+    MIDI.access = await navigator.requestMIDIAccess({ sysex: false });
+    MIDI.access.onstatechange = midiPickInput;       // выдернули, воткнули — подхватываем сами
+    midiPickInput();
+  } catch(e){
+    MIDI.ok = false;
+    MIDI.status = 'нет доступа к MIDI: ' + (e.name === 'SecurityError' || e.name === 'NotAllowedError'
+                  ? 'разрешение отклонено' : e.message) + ' · щёлкните, чтобы запросить снова';
+    midiShow();
+  }
+}
+
+// Слушаем один вход: выбранный руками, иначе MC1, иначе первый попавшийся.
+function midiPickInput(){
+  const ins = [...MIDI.access.inputs.values()].filter(i => i.state !== 'disconnected');
+  const inp = ins.find(i => i.id === MIDI.wantId) || ins.find(i => MIDI_DEVICE.test(i.name)) || ins[0] || null;
+  if (MIDI.input && MIDI.input !== inp) MIDI.input.onmidimessage = null;
+  MIDI.input = inp; MIDI.ok = !!inp;
+  if (inp){ inp.onmidimessage = midiMessage; MIDI.status = inp.name; }
+  else MIDI.status = 'контроллер не найден — подключите MC1';
+  midiShow();
+}
+
+function midiMessage(e){
+  const d = e.data, st = d[0], type = st & 0xF0, ch = (st & 0x0F) + 1;
+  if (st >= 0xF0) return;                             // часы, active sensing
+  let key = null, x = 0, txt;
+  if (type === 0xB0){
+    // CC 120–127 — канальный режим (All Notes Off у MC1 — это < и > вместе),
+    // ручкой он не бывает, и привязать его случайно нельзя.
+    if (d[1] >= 120){ MIDI.last = 'режим канала CC ' + d[1] + ' · к' + ch; return midiShowSoon(); }
+    key = 'cc:' + d[1]; x = d[2]/127; txt = midiName(key) + ' · CC ' + d[1] + ' = ' + d[2];
+  } else if (type === 0xE0){
+    // Центр питча ровно в середину диапазона: пружина возвращает к 8192, и
+    // параметр должен вернуться точно в исходное, а не на волосок мимо.
+    const v = d[1] | (d[2] << 7);
+    key = 'pb'; x = v === 8192 ? 0.5 : v/16383; txt = 'PB = ' + (v - 8192);
+  } else if (type === 0x90 && d[2] > 0){
+    // Нота с клавиатуры, заведённой в MC1, — удар руками, как клавиша b.
+    // Сильный удар ещё и излом с молниями: они слушают тот же пик.
+    const s = d[2]/127;
+    fire(0, kickWeight(0.3 + s, punchLaw().gK));
+    warpKick((s - 0.75)/0.25);
+    txt = 'нота ' + d[1] + ' · ' + d[2] + ' → удар';
+  } else if (type === 0xC0){
+    MIDI.program = d[1] + 1; txt = 'программа ' + MIDI.program;   // задел под банки
+  } else return;
+  MIDI.last = txt + ' · к' + ch;
+  if (key){
+    if (MIDI.learn && MIDI.learnKey) midiBind(key, MIDI.learnKey);
+    else midiApply(key, x);
+  }
+  midiShowSoon();
+}
+
+function midiApply(key, x){
+  const k = midiBinds()[key];
+  if (!k) return;
+  const [, , min, max, step] = SPEC_ITEM[k];
+  let v = min + (max - min)*x;
+  if (step >= 1) v = Math.round(v/step)*step;
+  // Параметр наш, пока в нём то, что поставили мы. Иначе его тронули
+  // снаружи — и ручка снова должна пройти через его значение.
+  if (MIDI.pickup && MIDI.setBy[k] !== CFG[k]){
+    const cx = (CFG[k] - min)/(max - min), prev = MIDI.lastX[key];
+    MIDI.lastX[key] = x;
+    const crossed = Math.abs(x - cx) < 0.02 || (prev != null && (prev - cx)*(x - cx) <= 0);
+    if (!crossed){ MIDI.wait[k] = x < cx ? '↑' : '↓'; return; }
+  }
+  delete MIDI.wait[k];
+  MIDI.lastX[key] = x;
+  setCtl(k, v);
+  MIDI.setBy[k] = CFG[k];
+  midiPersist();
+}
+
+function midiBind(key, k){
+  const b = midiBinds();
+  for (const q in b) if (b[q] === k) delete b[q];     // у параметра один орган
+  b[key] = k;
+  delete MIDI.setBy[k]; delete MIDI.lastX[key];
+  MIDI.learnKey = null;                               // обучение не выключаем: вяжем подряд
+  if (inputs[k]) flash(inputs[k].row);
+  midiSave();
+}
+
+function midiLearn(on){
+  MIDI.learn = on; MIDI.learnKey = null;
+  document.body.classList.toggle('learn', on);
+  if (on) panel.classList.remove('gone');             // вязать — значит щёлкать по ползункам
+  midiShow();
+}
+
+// Настройки пишем не чаще раза в четверть секунды: ручка шлёт сотню в секунду.
+let midiPT = 0, midiST = 0;
+function midiPersist(){ if (!midiPT) midiPT = setTimeout(() => { midiPT = 0; persist(); }, 250); }
+function midiShowSoon(){ if (!midiST) midiST = setTimeout(() => { midiST = 0; midiShow(); }, 60); }
+
+function midiMarks(){
+  const b = midiBinds(), by = {};
+  for (const key in b) by[b[key]] = midiName(key);
+  for (const k in inputs){
+    const c = inputs[k];
+    if (by[k]) c.labelEl.dataset.midi = by[k] + (MIDI.wait[k] || '');
+    else delete c.labelEl.dataset.midi;
+    c.row.classList.toggle('learning', MIDI.learn && MIDI.learnKey === k);
+  }
+}
+
+function midiShow(){
+  midiMarks();
+  const u = MIDI.ui;
+  if (!u) return;
+  u.st.textContent = MIDI.status;
+  u.st.className = 'midi-st' + (MIDI.ok ? ' on' : ' bad');
+  // Список входов перестраиваем, только если он поменялся: иначе открытый
+  // выпадающий список закрывался бы на каждом сообщении.
+  const ins = MIDI.access ? [...MIDI.access.inputs.values()] : [];
+  const sig = ins.map(i => i.id + i.state).join('|');
+  if (sig !== MIDI.selSig){ MIDI.selSig = sig; u.sel.replaceChildren(...ins.map(i => new Option(i.name, i.id))); }
+  if (MIDI.input) u.sel.value = MIDI.input.id;
+  u.selRow.classList.toggle('gone', ins.length < 2);
+  u.bLearn.classList.toggle('on', MIDI.learn);
+  u.bLearn.textContent = MIDI.learn ? (MIDI.learnKey ? 'крутите ручку' : 'щёлкните ползунок') : 'обучение';
+  u.bPick.classList.toggle('on', MIDI.pickup);
+  u.bPick.textContent = MIDI.pickup ? 'подхват' : 'сразу';
+  const b = midiBinds();
+  u.list.replaceChildren(...Object.keys(b).map(key => {
+    const k = b[key], row = document.createElement('div');
+    const n = document.createElement('b'); n.textContent = midiName(key);
+    const t = document.createElement('span');
+    t.textContent = (inputs[k] ? inputs[k].labelEl.textContent : k) + (MIDI.wait[k] ? '  ' + MIDI.wait[k] : '');
+    const x = document.createElement('i'); x.textContent = '✕'; x.title = 'снять привязку';
+    x.onclick = () => { delete b[key]; midiSave(); midiShow(); };
+    row.append(n, t, x); return row;
+  }));
+  u.mon.textContent = MIDI.last || 'сообщений пока не было';
+}
+
+function buildMidiPanel(rows){
+  const st = document.createElement('div'); st.className = 'midi-st';
+  st.onclick = () => { if (!MIDI.access) midiConnect(); };
+  const selRow = document.createElement('div'); selRow.className = 'ctl wide';
+  const l = document.createElement('label'); l.textContent = 'вход';
+  const sel = document.createElement('select');
+  sel.onchange = () => { MIDI.wantId = sel.value; midiSave(); midiPickInput(); };
+  selRow.append(l, sel);
+  const bar = document.createElement('div'); bar.className = 'prow';
+  const mk = (txt, title, fn) => { const b = document.createElement('button');
+    b.textContent = txt; b.title = title; b.onclick = fn; bar.append(b); return b; };
+  const bLearn = mk('обучение', 'щёлкнуть по ползунку, затем повернуть ручку — привязать (m, выход — Esc)',
+                    () => midiLearn(!MIDI.learn));
+  const bPick = mk('подхват', 'подхват: ручка берёт параметр, только пройдя через его значение · сразу: параметр прыгает к ручке',
+                   () => { MIDI.pickup = !MIDI.pickup; MIDI.wait = {}; midiSave(); midiShow(); });
+  mk('заводские', 'вернуть привязки ATEMP MC1 по умолчанию',
+     () => { MIDI.banks[MIDI.bank].binds = { ...MC1_BINDS }; MIDI.wait = {}; midiSave(); midiShow(); });
+  const list = document.createElement('div'); list.className = 'midi-list';
+  const mon = document.createElement('div'); mon.className = 'midi-mon';
+  rows.append(st, selRow, bar, list, mon);
+  MIDI.ui = { st, sel, selRow, bLearn, bPick, list, mon };
+  // В режиме обучения щелчок по ползунку выбирает параметр, а не двигает его.
+  const pick = e => {
+    if (!MIDI.learn) return;
+    const row = e.target.closest('.ctl');
+    const k = row && Object.keys(inputs).find(q => inputs[q].row === row);
+    if (!k) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.type === 'pointerdown'){ MIDI.learnKey = k; midiShow(); }
+  };
+  for (const t of ['pointerdown', 'mousedown', 'click']) pBody.addEventListener(t, pick, true);
+  midiShow();
+}
+
+midiLoad();
+midiConnect();
+
 function buildPanel(){
   for (const g of SPEC){
     const sec = document.createElement('div');
@@ -2931,6 +3704,8 @@ function buildPanel(){
         rows.append(bar2);
         deleteBtn = delBtn;
         rebuildPresetList();
+      } else if (it.type === 'midi'){
+        buildMidiPanel(rows);
       } else if (it.type === 'colors'){
         const names = document.createElement('div'); names.className = 'slotnames';
         for (const n of SLOTS){ const s = document.createElement('span'); s.textContent = n; names.append(s); }
@@ -3266,6 +4041,13 @@ function diagText(){
     L.push('  ' + new Date(t.at).toLocaleTimeString('ru-RU') + ' ' + t.way + ' ' + JSON.stringify(t.want));
     L.push('    → ' + (t.ok ? 'открылся' : t.name + ': ' + t.message));
   }
+  L.push('');
+  const mb = midiBinds();
+  L.push('MIDI: ' + MIDI.status + (MIDI.access ? ' · входов ' + MIDI.access.inputs.size : ''));
+  L.push('  банк «' + MIDI.banks[MIDI.bank].name + '» · привязок ' + Object.keys(mb).length +
+         ' · подхват ' + (MIDI.pickup ? 'вкл' : 'выкл') + (MIDI.program ? ' · программа ' + MIDI.program : ''));
+  L.push('  ' + (Object.keys(mb).map(key => midiName(key) + '→' + mb[key]).join('  ') || 'привязок нет'));
+  if (MIDI.last) L.push('  последнее: ' + MIDI.last);
   return L.join('\n');
 }
 
@@ -3300,6 +4082,8 @@ addEventListener('keydown', e => {
   else if (e.key === 'r'){ randomize(); }
   else if (e.key === 'h'){ hud.classList.toggle('gone'); keys.classList.toggle('gone'); }
   else if (e.key === 'd'){ toggleDiag(); }
+  else if (e.key === 'm'){ midiLearn(!MIDI.learn); }
+  else if (e.key === 'Escape' && MIDI.learn){ midiLearn(false); }
   else if (e.key === 'f'){ document.fullscreenElement ? document.exitFullscreen() : document.body.requestFullscreen(); }
   else if (e.key === 's'){ wantShot = true; }
   else if (e.key === 'v'){ toggleRecording(); }
@@ -3360,6 +4144,16 @@ function frame(){
     seedLife *= Math.exp(-dt/0.10);
   }
 
+  // Эмблема: поле логотипа строится при первом показе. Углы идут ровным
+  // ходом от настоящего времени, мимо T: на громком T ускоряется, и вращение
+  // эмблемы от этого бы дёргалось.
+  if (SCENES[CFG.scene].logo && !logoReady) buildLogoSDF();
+  logoSpin = (logoSpin + dt*(0.15 + 1.4*CFG.speed)) % (Math.PI*2);
+  logoTiltPh += dt*0.21;
+  // Сфера — вокруг той же вертикали, но в обратную сторону и медленнее.
+  logoOrbit = (logoOrbit - dt*(0.15 + 1.4*CFG.speed)*0.35 + Math.PI*2) % (Math.PI*2);
+  for (let i = 0; i < BOLTS; i++) boltB[i*4 + 1] += dt;
+
   pass(SCENE, SCENES[CFG.scene].prog, u => {
     U1f(u,'uTime',T);
     U1f(u,'uBass',F.bass);   U1f(u,'uMid',F.mid);      U1f(u,'uHigh',F.high);
@@ -3373,6 +4167,14 @@ function frame(){
     U1f(u,'uDHigh',CFG.dHigh);   U1f(u,'uDEnergy',CFG.dEnergy);
     U1f(u,'uVignette',CFG.vignette); U1f(u,'uNearClip',CFG.nearclip);
     U1f(u,'uFold',CFG.fold); U1f(u,'uStruct',CFG.struct); U1f(u,'uStretch',CFG.stretch);
+    U1f(u,'uWarp',F.warp*CFG.warp); U1f(u,'uWarpSeed',warpSeed);
+    if (u.uLogo){
+      bind(6, logoTex, u.uLogo);
+      U1f(u,'uSpin',logoSpin);
+      U1f(u,'uTilt',CFG.shape*(Math.PI/6)*Math.sin(logoTiltPh));   // «крен» 0.5 — ±15°
+      U1f(u,'uOrbit',logoOrbit); U1f(u,'uNetN',netCells());
+      if (u['uBoltA[0]']){ gl.uniform4fv(u['uBoltA[0]'], boltA); gl.uniform4fv(u['uBoltB[0]'], boltB); }
+    }
     U1i(u,'uOctaves', 2 + Math.round(CFG.complexity*4));
     const n = ['uBg','uShadow','uMid3','uAccent','uGlow'];
     slots.forEach((hx,i) => U3fv(u, n[i], hex2rgb(hx)));
