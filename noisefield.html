@@ -334,6 +334,16 @@ const FACTORY = [
                                       fill:.30, contrast:.62,
                                       bloom:1.5, bloomThr:.14, chroma:.6, grain:.10,
                                       exposure:1.15, vignette:.45, punch:.75 } },
+  /* Устроен как пресет MilkDrop: кадр почти целиком состоит из прошлого
+     кадра, сцена лишь подсыпает новое. Центр втягивает, край выбрасывает —
+     из-за этого картинка сама себя выворачивает наизнанку. */
+  { name:'воронка', palette:0,  cfg:{ persist:.94, accum:.85,
+                                      fbZoom:.995, zoomEdge:1.016, fbRot:.002, rotEdge:-.012,
+                                      flow:.35, flowScale:3.5, flowSpeed:.28,
+                                      speed:.30, shape:.45, complexity:.55, density:.30,
+                                      fill:.08, contrast:.75,
+                                      bloom:1.1, bloomThr:.42, chroma:.5, grain:.08,
+                                      exposure:.80, vignette:.50, punch:.70 } },
   { name:'вихрь',   palette:10, cfg:{ twist:1.4, segments:3, persist:.50, fbSwirl:.05,
                                       complexity:.60, density:.45, contrast:.68, bloom:1.4 } },
   // сцена «облака»
@@ -429,6 +439,9 @@ const SPEC = [
    ['flow',     'течение',  0,1,.001, 0],
    ['flowScale','масштаб течения',.5,14,.05, 4.0],
    ['flowSpeed','скорость течения',0,2,.001, .35],
+   ['zoomEdge','наплыв по краю',.9,1.1,.0005, 1],
+   ['rotEdge', 'доворот по краю',-.06,.06,.0002, 0],
+   ['accum',   'накопление',0,1,.001, 0],
  ]},
  { id:'post', title:'ПОСТ', items:[
    ['bloom',    'свечение',  0,3,.001, 1.0],
@@ -1575,6 +1588,7 @@ uniform sampler2D uScene, uHist;
 uniform vec2 uRes;
 uniform float uPersist, uZoom, uRot, uSwirl, uAspect;
 uniform float uFlow, uFlowScale, uFlowSpeed, uFlowTime;
+uniform float uZoomEdge, uRotEdge, uAccum;
 void main(){
   vec2 uv = gl_FragCoord.xy/uRes;
   vec3 sc = texture(uScene, uv).rgb;
@@ -1601,15 +1615,28 @@ void main(){
       c += d * uFlow * 0.012;
     }
 
-    float a = uRot + uSwirl*(1.0 - smoothstep(0.0, 0.8, rr));
+    /* Наплыв и вращение как ПОЛЯ, а не как два числа на весь кадр. Это
+       вторая половина того, почему MilkDrop выглядит живым: у него zoom и rot
+       считаются для каждого узла сетки, поэтому центр может втягивать, пока
+       края выбрасывают, и кадр сам себя выворачивает. Один общий множитель
+       умеет только равномерно наезжать. */
+    float k = smoothstep(0.0, 0.62, rr);
+    float a = uRot + mix(0.0, uRotEdge, k) + uSwirl*(1.0 - smoothstep(0.0, 0.8, rr));
+    float z = uZoom * mix(1.0, uZoomEdge, k);
     float s = sin(a), co = cos(a);
-    c = mat2(co,-s,s,co) * c * uZoom;
+    c = mat2(co,-s,s,co) * c * z;
     c.x /= uAspect;
     vec2 h = c + 0.5;
     if (h.x > 0.0 && h.x < 1.0 && h.y > 0.0 && h.y < 1.0)
       hist = texture(uHist, h).rgb * uPersist;
   }
-  outColor = vec4(max(sc, hist), 1.0);
+  /* Как новое ложится на старое. max прижимает: яркое место не становится
+     ярче, сколько раз по нему ни пройди, и шлейф упирается в собственный
+     потолок. Сложение накапливает — так и устроен MilkDrop, где кадр это
+     почти целиком прошлый кадр, а новая сцена лишь подсыпается сверху. Из
+     накопления и растут светящиеся ядра, которых никто не рисовал.
+     На нуле ручки поведение прежнее, чтобы старые пресеты не поехали. */
+  outColor = vec4(mix(max(sc, hist), sc + hist, uAccum), 1.0);
 }`;
 
 const FS_BRIGHT = `#version 300 es
@@ -4296,6 +4323,8 @@ function frame(){
     gl.uniform1f(u.uFlowScale, CFG.flowScale);
     gl.uniform1f(u.uFlowSpeed, CFG.flowSpeed);
     gl.uniform1f(u.uFlowTime, T);
+    gl.uniform1f(u.uZoomEdge, CFG.zoomEdge); gl.uniform1f(u.uRotEdge, CFG.rotEdge);
+    gl.uniform1f(u.uAccum, CFG.accum);
   });
   const tmp = HIST_A; HIST_A = HIST_B; HIST_B = tmp;
 
