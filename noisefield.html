@@ -344,6 +344,26 @@ const FACTORY = [
                                       fill:.08, contrast:.75,
                                       bloom:1.1, bloomThr:.42, chroma:.5, grain:.08,
                                       exposure:.80, vignette:.50, punch:.70 } },
+  /* Кривая из буфера звука плюс накопление: собственно приём MilkDrop, где
+     каждый кадр подсыпает тонкую светящуюся линию, а обратная связь растаскивает
+     её следы. Форму никто не рисовал — она наросла за сотни кадров. */
+  { name:'голос',   palette:2,  cfg:{ persist:.88, accum:.50,
+                                      fbZoom:1.003, zoomEdge:1.006, fbRot:.0025,
+                                      flow:.25, flowScale:3.0, flowSpeed:.30,
+                                      curveMode:2, curveAmp:.26, curveWidth:.007,
+                                      curveGlow:1.2, curveRad:.46, curveSpin:.22,
+                                      speed:.26, shape:.50, complexity:.45, density:.30,
+                                      fill:.04, contrast:.76,
+                                      bloom:1.2, bloomThr:.38, chroma:.5, grain:.08,
+                                      exposure:.85, vignette:.50, punch:.70 } },
+  { name:'серпантин', palette:8, cfg:{ persist:.84, accum:.40,
+                                      fbZoom:1.002, fbRot:-.004, rotEdge:.010,
+                                      curveMode:3, curveTurns:4.5, curveAmp:.17,
+                                      curveWidth:.005, curveGlow:1.0, curveRad:.62, curveSpin:-.35,
+                                      speed:.20, shape:.60, complexity:.35, density:.25,
+                                      fill:.02, contrast:.80,
+                                      bloom:1.4, bloomThr:.34, chroma:.9, grain:.12,
+                                      exposure:.90, vignette:.45, punch:.65 } },
   { name:'вихрь',   palette:10, cfg:{ twist:1.4, segments:3, persist:.50, fbSwirl:.05,
                                       complexity:.60, density:.45, contrast:.68, bloom:1.4 } },
   // сцена «облака»
@@ -443,6 +463,16 @@ const SPEC = [
    ['rotEdge', 'доворот по краю',-.06,.06,.0002, 0],
    ['accum',   'накопление',0,1,.001, 0],
  ]},
+ { id:'curve', title:'КРИВАЯ ПО ЗВУКУ', items:[
+   {type:'pick', k:'curveMode', label:'вид',
+    opts:[[0,'нет'],[1,'лента'],[2,'кольцо'],[3,'спираль'],[4,'фигура']]},
+   ['curveAmp',  'размах',    0,1,.001, .35],
+   ['curveWidth','толщина',   .001,.05,.0002, .008],
+   ['curveGlow', 'яркость',   0,3,.001, 1.0],
+   ['curveRad',  'радиус',    .1,1.2,.002, .55],
+   ['curveTurns','витков',    1,8,.05, 3.0],
+   ['curveSpin', 'вращение',  -2,2,.002, .25],
+ ]},
  { id:'post', title:'ПОСТ', items:[
    ['bloom',    'свечение',  0,3,.001, 1.0],
    ['bloomThr', 'порог',     0,1.5,.001, .32],
@@ -481,7 +511,7 @@ const RANDOM_GROUPS = ['scene','sym','fb','post'];
 const CFG = {};
 for (const g of SPEC) for (const it of g.items)
   if (Array.isArray(it)) CFG[it[0]] = it[5];
-  else if (it.type === 'select' || it.type === 'scenesel') CFG[it.k] = 0;
+  else if (it.type === 'select' || it.type === 'scenesel' || it.type === 'pick') CFG[it.k] = 0;
 CFG.palette = 0; CFG.scene = 0;
 // Заводские значения держим отдельно: точка отсчёта для отката подвижная и
 // уезжает вместе с загруженным пресетом, а сюда всегда можно вернуться.
@@ -1639,6 +1669,88 @@ void main(){
   outColor = vec4(mix(max(sc, hist), sc + hist, uAccum), 1.0);
 }`;
 
+/* ── Кривая из буфера звука ────────────────────────────────────────────────
+   Приём из AVS и MilkDrop: поверх сцены каждый кадр рисуется линия, точки
+   которой берутся прямо из формы волны. У них это главный источник нового
+   материала — сцена почти не меняется, а вот кривая дёргается на каждом
+   отсчёте, и обратная связь растаскивает её следы по всему кадру. Именно
+   поэтому у MilkDrop внутри картинки всё время что-то живое.
+
+   Геометрии в проекте до сих пор не было вообще: всё рисовалось одним
+   полноэкранным треугольником. Здесь нужен второй вершинный шейдер, но
+   буфера вершин по-прежнему нет — позиция считается из gl_VertexID, а форма
+   волны читается текстурой прямо в вершинном шейдере. */
+
+const CURVE_N = 320;                       // точек в кривой
+let curveSpin = 0;
+
+const VS_CURVE = `#version 300 es
+uniform sampler2D uWave;
+uniform float uN, uAmp, uWidth, uAspect, uMode, uSpin, uRadius, uTurns;
+out float vEdge, vT;
+
+vec2 wave(float t){
+  vec2 w = texture(uWave, vec2(t, 0.5)).rg * 2.0 - 1.0;
+  return w;
+}
+
+vec2 point(float t){
+  vec2 w = wave(t);
+  if (uMode < 1.5){                        // лента поперёк экрана
+    return vec2(t*2.0 - 1.0, w.x*uAmp);
+  } else if (uMode < 2.5){                 // кольцо: классика MilkDrop
+    float a = t*6.28318530718 + uSpin;
+    float r = uRadius + w.x*uAmp;
+    return vec2(cos(a), sin(a))*r;
+  } else if (uMode < 3.5){                 // спираль
+    float a = t*6.28318530718*uTurns + uSpin;
+    float r = uRadius*(0.22 + 0.78*t) + w.x*uAmp;
+    return vec2(cos(a), sin(a))*r;
+  }
+  // фигура: левый канал по горизонтали, правый по вертикали
+  float a = uSpin*0.4, s = sin(a), c = cos(a);
+  return mat2(c,-s,s,c) * vec2(w.x, w.y) * uAmp * 1.6;
+}
+
+void main(){
+  int i = gl_VertexID >> 1;
+  float side = float(gl_VertexID & 1)*2.0 - 1.0;
+  float t  = float(i)/(uN - 1.0);
+  float dt = 1.0/(uN - 1.0);
+
+  vec2 p0 = point(max(0.0, t - dt));
+  vec2 p1 = point(min(1.0, t + dt));
+  vec2 p  = point(t);
+
+  // Толщина по нормали к ходу кривой: иначе лента схлопывается там, где
+  // кривая идёт вертикально.
+  vec2 dir = p1 - p0;
+  dir.x *= uAspect;
+  float L = length(dir);
+  vec2 nrm = L > 1e-6 ? vec2(-dir.y, dir.x)/L : vec2(0.0, 1.0);
+  nrm.x /= uAspect;
+
+  p += nrm * side * uWidth;
+  p.x /= uAspect;
+  vEdge = side; vT = t;
+  gl_Position = vec4(p, 0.0, 1.0);
+}`;
+
+const FS_CURVE = `#version 300 es
+precision highp float;
+in float vEdge, vT;
+out vec4 outColor;
+uniform vec3 uAccent, uGlow;
+uniform float uGlowAmt, uPulse;
+void main(){
+  // Мягкий край поперёк ленты — иначе это проволока в один пиксель, которую
+  // обратная связь размазывает в грязь, а не в свечение.
+  float a = 1.0 - abs(vEdge);
+  a = a*a;
+  vec3 col = mix(uAccent, uGlow, smoothstep(0.35, 1.0, a) * 0.8);
+  outColor = vec4(col * a * uGlowAmt * (1.0 + 0.6*uPulse), 1.0);
+}`;
+
 const FS_BRIGHT = `#version 300 es
 precision highp float;
 out vec4 outColor;
@@ -1764,9 +1876,9 @@ function shader(type, src){
          src.split('\n').map((l,i)=>String(i+1).padStart(4)+' | '+l).join('\n'));
   return s;
 }
-function program(fs){
+function program(fs, vs){
   const p = gl.createProgram();
-  gl.attachShader(p, shader(gl.VERTEX_SHADER, VS));
+  gl.attachShader(p, shader(gl.VERTEX_SHADER, vs || VS));
   gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) fail('Линковка: ' + gl.getProgramInfoLog(p));
@@ -1814,6 +1926,7 @@ const SCENES = [
 ];
 SCENES.forEach(sc => sc.prog = program(sc.fs));
 const P_FEED   = program(FS_FEED);
+const P_CURVE  = program(FS_CURVE, VS_CURVE);
 const P_BRIGHT = program(FS_BRIGHT);
 const P_BLUR   = program(FS_BLUR);
 const P_COMP   = program(FS_COMP);
@@ -3734,6 +3847,15 @@ function buildPanel(){
         sel.onchange = () => { CFG[it.k] = +sel.value; applyPalette(+sel.value); persist(); };
         paletteSelect = sel;
         row.append(l, sel); rows.append(row);
+      } else if (it.type === 'pick'){
+        const row = document.createElement('div'); row.className = 'ctl wide';
+        const l = document.createElement('label'); l.textContent = it.label;
+        const sel = document.createElement('select');
+        for (const [v, t] of it.opts) sel.append(new Option(t, v));
+        sel.value = CFG[it.k];
+        sel.onchange = () => { CFG[it.k] = +sel.value; persist(); };
+        picks[it.k] = sel;
+        row.append(l, sel); rows.append(row);
       } else if (it.type === 'scenesel'){
         const row = document.createElement('div'); row.className = 'ctl wide';
         const l = document.createElement('label'); l.textContent = it.label;
@@ -3817,10 +3939,12 @@ function applySceneLabels(){
   }
 }
 
+const picks = {};
 function setCtl(k, v){
   CFG[k] = v;
   const c = inputs[k];
   if (c){ c.inp.value = v; c.out.textContent = fmt(v, c.step); }
+  if (picks[k]) picks[k].value = v;
   mark(k);
 }
 
@@ -3948,12 +4072,14 @@ function applyPreset(p){
   if (!p) return;
   if (p.factory){
     for (const k in DEFAULTS) setCtl(k, DEFAULTS[k]);
+    setCtl('curveMode', 0);
     for (const k in p.cfg) if (k in CFG) setCtl(k, p.cfg[k]);
     CFG.palette = p.palette || 0;
     CFG.scene = p.scene || 0;
     applyPalette(CFG.palette);
   } else {
     for (const k in DEFAULTS) setCtl(k, (k in p.cfg) ? p.cfg[k] : DEFAULTS[k]);
+    setCtl('curveMode', p.cfg.curveMode || 0);
     CFG.palette = p.cfg.palette || 0;
     CFG.scene = p.cfg.scene || 0;
     if (Array.isArray(p.slots) && p.slots.length === 5){
@@ -4231,6 +4357,8 @@ function frame(){
   analyze(dt, now);
   // Время течёт быстрее на громких кусках — сцена ускоряется вместе с треком.
   T += dt * (0.12 + CFG.speed*1.6 + F.energy*CFG.dEnergy*1.1);
+  // Своя фаза у кривой: она крутится ровно, не разгоняясь вместе со сценой.
+  curveSpin += dt * CFG.curveSpin;
 
   allocate();
 
@@ -4310,6 +4438,32 @@ function frame(){
       if (u.uStateRes) gl.uniform2f(u.uStateRes, RD_W, RD_H);
     }
   });
+
+  /* Кривая кладётся в тот же буфер, что и сцена, и попадает в обратную связь
+     вместе с ней. Сложением, а не поверх: это источник света, а не наклейка. */
+  if (CFG.curveMode > 0){
+    gl.bindFramebuffer(gl.FRAMEBUFFER, SCENE.f);
+    gl.viewport(0, 0, SCENE.w, SCENE.h);
+    gl.useProgram(P_CURVE.p);
+    const u = P_CURVE.u;
+    bind(4, waveTex, u.uWave);
+    U1f(u,'uN',CURVE_N);
+    U1f(u,'uAmp',CFG.curveAmp*(1.0 + 0.5*F.pulse*CFG.dBass));
+    U1f(u,'uWidth',CFG.curveWidth);
+    U1f(u,'uAspect',W/H);
+    U1f(u,'uMode',CFG.curveMode);
+    U1f(u,'uSpin',curveSpin);
+    U1f(u,'uRadius',CFG.curveRad);
+    U1f(u,'uTurns',CFG.curveTurns);
+    U1f(u,'uGlowAmt',CFG.curveGlow);
+    U1f(u,'uPulse',F.pulse);
+    U3fv(u,'uAccent',hex2rgb(slots[3]));
+    U3fv(u,'uGlow',hex2rgb(slots[4]));
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, CURVE_N*2);
+    gl.disable(gl.BLEND);
+  }
 
   // Обратная связь: пишем в HIST_B, читая HIST_A, затем меняем местами.
   pass(HIST_B, P_FEED, u => {
