@@ -462,6 +462,7 @@ const SPEC = [
    ['zoomEdge','наплыв по краю',.9,1.1,.0005, 1],
    ['rotEdge', 'доворот по краю',-.06,.06,.0002, 0],
    ['accum',   'накопление',0,1,.001, 0],
+   ['fadeDur', 'переход, с',0,6,.05, 1.5],
  ]},
  { id:'curve', title:'КРИВАЯ ПО ЗВУКУ', items:[
    {type:'pick', k:'curveMode', label:'вид',
@@ -1842,14 +1843,22 @@ void main(){
 const FS_FXAA = `#version 300 es
 precision highp float;
 out vec4 outColor;
-uniform sampler2D uTex;
+uniform sampler2D uTex, uFade;
 uniform vec2 uRes;
-uniform float uAmount;
+uniform float uAmount, uFadeAmt;
 const vec3 L = vec3(0.299, 0.587, 0.114);
+
+// Снимок прошлого пресета подмешивается последним действием кадра: перед ним
+// картинка уже полностью собрана, и растворение не влияет ни на шлейф, ни на
+// свечение — только на то, что видит глаз.
+void emit(vec3 c, vec2 uv){
+  outColor = vec4(uFadeAmt > 0.001 ? mix(c, texture(uFade, uv).rgb, uFadeAmt) : c, 1.0);
+}
+
 void main(){
   vec2 ip = 1.0/uRes, uv = gl_FragCoord.xy*ip;
   vec3 m  = texture(uTex, uv).rgb;
-  if (uAmount < 0.01){ outColor = vec4(m, 1.0); return; }
+  if (uAmount < 0.01){ emit(m, uv); return; }
   vec3 nw = texture(uTex, uv + vec2(-1.0,-1.0)*ip).rgb;
   vec3 ne = texture(uTex, uv + vec2( 1.0,-1.0)*ip).rgb;
   vec3 sw = texture(uTex, uv + vec2(-1.0, 1.0)*ip).rgb;
@@ -1857,7 +1866,7 @@ void main(){
   float lnw = dot(nw,L), lne = dot(ne,L), lsw = dot(sw,L), lse = dot(se,L), lm = dot(m,L);
   float lo = min(lm, min(min(lnw,lne), min(lsw,lse)));
   float hi = max(lm, max(max(lnw,lne), max(lsw,lse)));
-  if (hi - lo < max(0.028, hi*0.125)){ outColor = vec4(m, 1.0); return; }
+  if (hi - lo < max(0.028, hi*0.125)){ emit(m, uv); return; }
   vec2 dir = vec2(-((lnw + lne) - (lsw + lse)), ((lnw + lsw) - (lne + lse)));
   float red = max((lnw + lne + lsw + lse) * 0.03125, 1.0/128.0);
   dir = clamp(dir / (min(abs(dir.x), abs(dir.y)) + red), -8.0, 8.0) * ip * uAmount;
@@ -1865,7 +1874,7 @@ void main(){
               + texture(uTex, uv + dir*(2.0/3.0 - 0.5)).rgb);
   vec3 b = a*0.5 + 0.25*(texture(uTex, uv - dir*0.5).rgb + texture(uTex, uv + dir*0.5).rgb);
   float lb = dot(b, L);
-  outColor = vec4((lb < lo || lb > hi) ? a : b, 1.0);
+  emit((lb < lo || lb > hi) ? a : b, uv);
 }`;
 
 function shader(type, src){
@@ -2074,7 +2083,7 @@ function makeFBO(w, h, wrap){
   return {t,f,w,h};
 }
 
-let SCENE=null, HIST_A=null, HIST_B=null, BL_A=null, BL_B=null, DEF=null, LDR=null, W=0, H=0, lastBudget=-1;
+let SCENE=null, HIST_A=null, HIST_B=null, BL_A=null, BL_B=null, DEF=null, LDR=null, FADE=null, W=0, H=0, lastBudget=-1;
 let RD_A=null, RD_B=null, RD_W=0, RD_H=0, simNeedsInit=true;
 // Автобюджет: ползунок задаёт потолок, а фактическое разрешение подстраивается
 // так, чтобы держать 60. Иначе на машине послабее всё едет молча, и понять,
@@ -2091,12 +2100,13 @@ function allocate(){
   if (s < 1){ w = Math.round(w*s); h = Math.round(h*s); }
   if (w === W && h === H && budget === lastBudget) return;
   W = w; H = h; lastBudget = budget; cv.width = w; cv.height = h;
-  [SCENE,HIST_A,HIST_B,BL_A,BL_B,DEF,LDR].forEach(f => { if(f){ gl.deleteTexture(f.t); gl.deleteFramebuffer(f.f); } });
+  [SCENE,HIST_A,HIST_B,BL_A,BL_B,DEF,LDR,FADE].forEach(f => { if(f){ gl.deleteTexture(f.t); gl.deleteFramebuffer(f.f); } });
   SCENE  = makeFBO(W,H);
   HIST_A = makeFBO(W,H); HIST_B = makeFBO(W,H);
   BL_A   = makeFBO(W>>1,H>>1); BL_B = makeFBO(W>>1,H>>1);
   DEF    = makeFBO(W>>1,H>>1);
   LDR    = makeFBO(W,H);
+  FADE   = makeFBO(W,H);
   // Поле реакции живёт своим разрешением: узор крупный, гнаться за экраном
   // ему незачем, а шагов симуляции на кадр нужно много.
   const rdLong = 480;
@@ -3940,6 +3950,66 @@ function applySceneLabels(){
 }
 
 const picks = {};
+
+/* ── Переход между пресетами ───────────────────────────────────────────────
+   У MilkDrop переключение всегда плавное, и это заметно меняет ощущение от
+   сессии: жёсткий рез сбивает, а переход читается как часть музыки.
+
+   Переходов здесь два, и они закрывают разное. Числовые крутилки едут от
+   старых значений к новым, поэтому форма перетекает, а не подменяется.
+   Но сцена, палитра и вид кривой — вещи дискретные, их не усреднить: при
+   смене сцены работает другой шейдер. Для них снимается кадр старого пресета
+   и растворяется поверх нового. Рендерить обе сцены разом было бы честнее,
+   но вдвое дороже, а снимок стоит одно копирование текстуры. */
+const fade = { amt: 0, t: 0, dur: 0, from: null, to: null, slotsFrom: null, slotsTo: null };
+
+// Ключи со стягиванием к целым: дробное число сегментов симметрии смысла
+// не имеет.
+const TWEEN_INT = { segments: 1, lookAhead: 1 };
+
+function startFade(from, to, slotsFrom, slotsTo){
+  const dur = CFG.fadeDur;
+  if (!(dur > 0.01) || !LDR){ fade.amt = 0; fade.dur = 0; return; }
+  // Снимок берём с ПОСЛЕДНЕГО собранного кадра: новый пресет ещё не рисовался.
+  pass(FADE, P_BRIGHT, u => { bind(0, LDR.t, u.uTex); gl.uniform1f(u.uThr, -1.0); });
+  fade.amt = 1; fade.t = 0; fade.dur = dur;
+  fade.from = from; fade.to = to;
+  fade.slotsFrom = slotsFrom; fade.slotsTo = slotsTo;
+}
+
+function stepFade(dt){
+  if (fade.dur <= 0) return;
+  fade.t += dt/fade.dur;
+  const k = Math.min(1, fade.t);
+  // Снимок уходит быстрее, чем едут крутилки: его дело — закрыть разрыв в
+  // первый момент, дальше картинка должна жить сама.
+  fade.amt = Math.max(0, 1 - k*2.2);
+  if (fade.from && fade.to){
+    const e = k*k*(3 - 2*k);                      // плавно на обоих концах
+    for (const key in fade.to){
+      const v = fade.from[key] + (fade.to[key] - fade.from[key])*e;
+      CFG[key] = TWEEN_INT[key] ? Math.round(v) : v;
+    }
+    if (fade.slotsFrom && fade.slotsTo)
+      slots = fade.slotsTo.map((hx, i) => mixHex(fade.slotsFrom[i], hx, e));
+  }
+  if (k >= 1){
+    if (fade.to) for (const key in fade.to) setCtl(key, fade.to[key]);
+    if (fade.slotsTo){
+      slots = fade.slotsTo.slice();
+      colorInputs.forEach((ci, i) => ci.value = slots[i]);
+    }
+    fade.dur = 0; fade.amt = 0; fade.from = fade.to = null;
+    fade.slotsFrom = fade.slotsTo = null;
+  }
+}
+
+// Смешение двух цветов записи #rrggbb.
+function mixHex(a, b, k){
+  const pa = hex2rgb(a), pb = hex2rgb(b);
+  const ch = i => Math.max(0, Math.min(255, Math.round((pa[i] + (pb[i]-pa[i])*k)*255)));
+  return '#' + [0,1,2].map(i => ch(i).toString(16).padStart(2,'0')).join('');
+}
 function setCtl(k, v){
   CFG[k] = v;
   const c = inputs[k];
@@ -4070,6 +4140,10 @@ function setRefs(ref){
 
 function applyPreset(p){
   if (!p) return;
+  // Запоминаем, откуда едем: applyPreset доведёт CFG до цели, а потом мы
+  // отмотаем числовые крутилки назад и пустим их туда плавно.
+  const from = {}; for (const k in DEFAULTS) from[k] = CFG[k];
+  const slotsFrom = slots.slice();
   if (p.factory){
     for (const k in DEFAULTS) setCtl(k, DEFAULTS[k]);
     setCtl('curveMode', 0);
@@ -4093,10 +4167,17 @@ function applyPreset(p){
   simNeedsInit = true;
   applySceneLabels();
   setRefs({...CFG});          // загруженный пресет и становится «исходным»
+  const to = {}; for (const k in DEFAULTS) to[k] = CFG[k];
+  startFade(from, to, slotsFrom, slots.slice());
+  if (fade.dur > 0) for (const k in from) CFG[k] = from[k];
   persist();
 }
 
 function savePreset(){
+  // Переход на лету означает, что CFG сейчас на полпути. Сохранять надо цель,
+  // а не случайный промежуточный кадр.
+  if (fade.dur > 0) stepFade(fade.dur*2);
+
   const list = userPresets();
   const cur = presetSelect && presetSelect.value;
   const suggested = cur && cur[0] === 'u' ? list[+cur.slice(1)].name : '';
@@ -4356,6 +4437,7 @@ function frame(){
 
   analyze(dt, now);
   // Время течёт быстрее на громких кусках — сцена ускоряется вместе с треком.
+  stepFade(dt);
   T += dt * (0.12 + CFG.speed*1.6 + F.energy*CFG.dEnergy*1.1);
   // Своя фаза у кривой: она крутится ровно, не разгоняясь вместе со сценой.
   curveSpin += dt * CFG.curveSpin;
@@ -4513,7 +4595,10 @@ function frame(){
     gl.uniform1f(u.uHue, CFG.hue);   gl.uniform1f(u.uSat, CFG.sat);
   });
 
-  pass(null, P_FXAA, u => { bind(0, LDR.t, u.uTex); gl.uniform1f(u.uAmount, CFG.aa); });
+  pass(null, P_FXAA, u => {
+    bind(0, LDR.t, u.uTex); gl.uniform1f(u.uAmount, CFG.aa);
+    bind(7, FADE.t, u.uFade); gl.uniform1f(u.uFadeAmt, fade.amt);
+  });
 
   fps += ((1/Math.max(dt,1e-3)) - fps) * 0.05;
 
